@@ -181,3 +181,45 @@ gated only by three env knobs (`AWS_LC_SYS_CMAKE_BUILDER=1`, an `alloy` feature
 pare, `LOGOS_DELIVERY_RELOCATABLE=1`) and a one-line `android` arm in the
 delivery build.rs — and a stable address across restarts needs nothing more than
 adding `from_bytes` rehydration the crypto layer already round-trips.
+
+---
+
+## WALL: no MLS/conversation rehydration across a node restart (2026-07-24)
+
+**Symptom (on-device).** Every conversation created in an EARLIER node session
+fails on send with `send_message failed: convo with id: <id> was not found`.
+Our app-side SQLite keeps the row + full history, so the thread looks healthy
+while every send fails. Affects **1:1 AND groups** (logos-chat-android#103).
+
+**Diagnosis (libchat @ d2124fd).** Four separate gaps, one of them decisive:
+
+1. **DECISIVE — MLS state is in-memory only.**
+   `core/conversations/src/inbox_v2/mls_provider.rs`:
+   `impl OpenMlsProvider for MlsEphemeralPqProvider { type StorageProvider =
+   openmls_memory_storage::MemoryStorage; }`
+   `GroupV1Convo::load` does `MlsGroup::load(cx.mls_provider.storage(), &group_id)`,
+   so after a restart the MLS group is ALWAYS absent regardless of any metadata we
+   persist. A 1:1 is affected too because `DirectV1Convo` is a thin wrapper over
+   `GroupV1Convo` (`type DelegateGroup = GroupV1Convo`).
+2. `Core::new_with_name` (used by `ChatClient::new`, hence our `open_persistent`)
+   is the **testing** constructor — it mints a fresh `Identity::new(...)` instead of
+   `store.load_identity()`. `Core::new_from_store` is the persistent one and is unused.
+3. `create_direct_convo_v1` and `create_group_convo_v2` never call
+   `store.save_conversation(...)` (only `create_group_convo_v1` does), so
+   `load_conversation_meta` -> `NoConvo`.
+4. `ConversationKind` has only `{Unknown, GroupV1}` — no `DirectV1`/`GroupV2`, so
+   `load_convo`/`load_group_convo` cannot reconstruct those kinds at all.
+
+**Why it is tractable anyway.** `openmls_memory_storage` 0.5.0 exposes a public
+`values: RwLock<HashMap<Vec<u8>,Vec<u8>>>` plus `serialize()`/`deserialize()` (and
+ships a `persistence.rs`). So we can persist openmls's OWN key-value store verbatim
+— no hand-written `StorageProvider` (~40 security-sensitive methods) required.
+
+**Planned fix (additive patch, same style as the M1' persistence patch).**
+- storage/sqlite: a blob slot for the serialized MLS store (kept inside the
+  ENCRYPTED sqlite store — never a plaintext sidecar file).
+- `Core`: `restore_mls_state()` on assemble, `persist_mls_state()` after mutations.
+- Save conversation meta on direct + groupV2 create; add the missing
+  `ConversationKind` variants + their load paths.
+- Prefer `new_from_store` on the persistent path so the installation identity is
+  loaded rather than regenerated.

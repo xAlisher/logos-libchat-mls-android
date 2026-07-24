@@ -376,3 +376,45 @@ verb on a **direct** conversation id returned NULL with
 ProposalValidationError(DuplicateSignatureKey)))`; the workspace is `panic="abort"`).
 A self-conversation is not a supported shortcut for tests; use a second published
 address. Worth guarding in the app before a user can type their own address.
+
+## Node 10 — group members (current roster), verb #17 (2026-07-25)
+
+**The need.** The app must read a group's CURRENT roster (as account addresses) to
+diff against a prior snapshot and detect who joined or left. The event stream only
+signals *that* membership changed (`ConversationMembersChanged { convo_id }`), never
+*who* — so the app needs a pull verb that returns the live member set.
+
+**Move (wrapper-only — NO libchat source change).** Exactly like Node 9: nothing was
+added to the fork. `logos_chat` re-exports `logos_generic_chat::*`, and
+`ChatClient::group_members(&mut self, convo_id) -> Result<Vec<GroupMember>, ClientError>`
+(`crates/generic-chat/src/client.rs:255`) with `pub struct GroupMember { account:
+Option<IdentId>, local_identity: IdentId }` are already reachable from the wrapper crate.
+`patches/libchat-android-arm64.patch` is **unchanged** by this node (verified: a clean
+`git checkout -f d2124fd` + drop-created-files + `git apply --check` passes).
+
+- `wrapper/src/lib.rs` — `logoschat_group_members(handle, convo_id) -> *mut c_char`,
+  returning a JSON array `[{"account":"<hex>","device":"<hex>"}, …]`. `account` is the
+  member's verified account hex, or JSON `null` when the directory can't confirm the
+  claim (the member is still cryptographically in the group, listed by its device);
+  `device` is `local_identity` as hex. Same allocation/error style as
+  `logoschat_group_metadata` (`IdentId::as_str()` for the hex, `json_str` per field,
+  caller frees with `logoschat_free_string`, NULL on error with the reason in
+  `logoschat_last_error`). One entry per account (self included).
+
+- `include/liblogoschat.h` — documented declaration. **ABI goes 16 → 17 exports.**
+
+**Error, not an empty array.** `group_members` fails for a direct (1:1) conversation
+and for an unknown `convo_id`; both surface as NULL + a message, never `[]`. An empty
+array would mean a real group with no members, which cannot happen (the creator is
+always in it).
+
+**Proof (host x86_64, headless).** A dlopen driver (modeled on
+`scripts/desktop-peer-mls/peer.c`): `open_persistent` → print `logoschat_get_address`
+→ `create_group("m","")` → `logoschat_group_members(groupId)` returned verbatim
+`[{"account":"a9474cdb…dc6ad830","device":"6e6ceb…05fb4511"}]` — a valid array whose
+sole `account` equals the printed self address `a9474cdb…dc6ad830` (creator = only
+member). The same verb on a non-group / unknown convo id returned NULL with
+`group_members failed: convo with id: 0000…0000 was not found`. (The Node-9 self-1:1
+libchat abort still stands, so the error case uses an unknown id rather than a real
+1:1 — same NULL+error branch.) `cargo test --release --workspace`: all green, 0 failed.
+arm64 build: **17** `logoschat_*` exports.

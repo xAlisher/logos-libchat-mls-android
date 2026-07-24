@@ -428,6 +428,59 @@ pub unsafe extern "C" fn logoschat_group_metadata(
     }
 }
 
+/// The group's CURRENT roster as a JSON array string,
+/// `[{"account":"<hex>","device":"<hex>"}, …]`. Caller frees.
+///
+/// One entry per account (self included); an account's several devices collapse
+/// to a single entry. A member whose account claim the directory cannot confirm
+/// is still cryptographically in the group, so it is listed by its device with
+/// `account` set to JSON `null`; `device` is always the member's local (delegate)
+/// identity, hex-encoded. Read this to diff against a previous snapshot and
+/// detect who joined or left.
+///
+/// Returns null (see `logoschat_last_error`) for a direct (1:1) conversation and
+/// for an unknown `convo_id` — an error, never an empty array.
+///
+/// # Safety
+/// `h` a valid handle; `convo_id` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_group_members(
+    h: *mut c_void,
+    convo_id: *const c_char,
+) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    let Some(convo) = cstr(convo_id) else {
+        set_last_error("convo_id is null or not UTF-8");
+        return ptr::null_mut();
+    };
+    match h.client.group_members(convo) {
+        Ok(members) => {
+            let entries: Vec<String> = members
+                .iter()
+                .map(|m| {
+                    let account = match &m.account {
+                        Some(a) => json_str(a.as_str()),
+                        None => "null".to_string(),
+                    };
+                    format!(
+                        r#"{{"account":{},"device":{}}}"#,
+                        account,
+                        json_str(m.local_identity.as_str())
+                    )
+                })
+                .collect();
+            to_c_string(format!("[{}]", entries.join(",")))
+        }
+        Err(e) => {
+            set_last_error(format!("group_members failed: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Encrypt and send `content` (`len` bytes) to `convo_id`. 0 on success, -1 else.
 ///
 /// # Safety

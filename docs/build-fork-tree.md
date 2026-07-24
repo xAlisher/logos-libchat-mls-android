@@ -215,11 +215,45 @@ while every send fails. Affects **1:1 AND groups** (logos-chat-android#103).
 ships a `persistence.rs`). So we can persist openmls's OWN key-value store verbatim
 — no hand-written `StorageProvider` (~40 security-sensitive methods) required.
 
-**Planned fix (additive patch, same style as the M1' persistence patch).**
-- storage/sqlite: a blob slot for the serialized MLS store (kept inside the
-  ENCRYPTED sqlite store — never a plaintext sidecar file).
-- `Core`: `restore_mls_state()` on assemble, `persist_mls_state()` after mutations.
-- Save conversation meta on direct + groupV2 create; add the missing
-  `ConversationKind` variants + their load paths.
-- Prefer `new_from_store` on the persistent path so the installation identity is
-  loaded rather than regenerated.
+**FIX (shipped in `patches/libchat-android-arm64.patch`, additive, same style as
+the M1' persistence patch).**
+- `core/storage`: new `MlsStateStore` trait (`save_mls_state` / `load_mls_state`),
+  added to the `ChatStore` supertrait bundle; `ConversationKind::GroupV2` added.
+- `core/sqlite`: migration `003_mls_state.sql` (a single-row `mls_state` table) +
+  `impl MlsStateStore for ChatStorage`. The blob holds MLS private key material,
+  so it lives in the SAME encrypted database as the identity — never a plaintext
+  sidecar file.
+- `mls_provider.rs`: `MlsEphemeralPqProvider::from_storage(MemoryStorage)` plus
+  `serialize_storage`/`deserialize_storage` over openmls' public `values` map.
+  The wire layout matches upstream `MemoryStorage::{serialize,deserialize}`, but
+  is re-implemented here because upstream gates those behind the test-only
+  `test-utils` feature. No `StorageProvider` is hand-written.
+- `Core::assemble`: rehydrates the provider from the store's blob when present.
+  `Core::persist_mls_state()` (public) checkpoints it; called from
+  `register_keypackage`, `create_direct_convo_v1`, `create_group_convo_v1/v2`,
+  `group_add_member`, `send_content`, `handle_payload` and `wakeup` — the last
+  four checkpoint even on error, since a partly applied MLS operation still
+  mutated state. Exposed as `ChatClient::persist_mls_state`.
+- Conversation meta is now saved on direct create (as `GroupV1`, which is what
+  `DirectV1Convo` delegates to, so the existing `load_mls_convo` path rebuilds it)
+  and on GroupV2 create.
+- `ChatClient::new` uses `Core::new_from_store` (loads the stored installation
+  identity) instead of the testing `new_with_name`, then calls
+  `register_keypackage()` explicitly so a fresh last-resort key package is still
+  published on every open — and that call now checkpoints the MLS state itself, so
+  the key package's private init key survives the restart too.
+
+**Proof (host x86_64, two separate processes against the same db + identity).**
+Phase 1 `open_persistent` → `create_conversation(peer)` → shutdown; phase 2
+`open_persistent` → `send_message(<that id>)` → `rc=0`, no error. The same driver
+against a pre-fix build reproduces the bug verbatim:
+`send_message failed: convo with id: <id> was not found`.
+
+**LIMITATION — GroupV2 still cannot be rehydrated.** de-mls' `Conversation` only
+offers `create`/`join`, no load path, so a GroupV2 built in an earlier session
+cannot be reconstructed even with the MLS blob restored. Its meta row IS saved (so
+it still shows in `list_conversations`) and `load_convo`/`load_group_convo` now
+return an explicit `unsupported conversation type: group_v2 cannot be rebuilt from
+storage: de-mls has no load path (rejoin the group)` instead of a misleading
+"not found". Groups surviving a restart needs a load/serialize path upstream in
+de-mls (or moving groups onto GroupV1, which does rehydrate).

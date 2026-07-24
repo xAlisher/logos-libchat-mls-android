@@ -50,6 +50,344 @@ index 0b3950d..c0edd01 100644
  base64 = "0.22"
  chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "37ec98a151f6d50aab2905802ac0a896477e62ea" }
  de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "2c7a8669c1492c749c02efd2c5ac45e93e4926a3"} # Expose Mls Extensions (#131)
+diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
+index 99ad312..53203eb 100644
+--- a/core/conversations/src/core.rs
++++ b/core/conversations/src/core.rs
+@@ -11,16 +11,20 @@ use crate::{
+ use crate::{
+     conversation::{Convo, GroupConvo},
+     errors::ChatError,
+-    inbox_v2::{InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider},
++    inbox_v2::{
++        InboxV2, MlsEphemeralPqProvider, MlsIdentityProvider, deserialize_storage,
++        serialize_storage,
++    },
+     outcomes::{ConvoOutcome, InboxOutcome, PayloadOutcome},
+     proto::{EncryptedPayload, EnvelopeV1, Message},
+ };
+ use crypto::{Identity, PublicKey};
+ use openmls::group::GroupId;
++use openmls::prelude::OpenMlsProvider as _;
+ use shared_traits::{IdentId, IdentIdRef};
+ use std::collections::HashMap;
+ use std::fmt::Debug;
+-use storage::{ChatStore, ConversationKind, ConversationStore};
++use storage::{ChatStore, ConversationKind, ConversationStore, MlsStateStore};
+ use tracing::{info, instrument};
+ 
+ pub use crate::conversation::ConversationId;
+@@ -129,7 +133,15 @@ where
+         // credential below still carries the full `id()`.
+         let ident_id = IdentId::new(hex::encode(ident.public_key().as_ref()));
+         let mls_identity = MlsIdentityProvider::new(ident);
+-        let mls_provider = MlsEphemeralPqProvider::new().map_err(ChatError::generic)?;
++        // Restore openmls' own key-value store if this store has ever
++        // checkpointed one, so groups created in an earlier session are still
++        // loadable (`MlsGroup::load` reads straight out of this provider). A
++        // store with no blob yet is a first run: start empty.
++        let mls_provider = match store.load_mls_state()? {
++            Some(blob) => MlsEphemeralPqProvider::from_storage(deserialize_storage(&blob)?)
++                .map_err(ChatError::generic)?,
++            None => MlsEphemeralPqProvider::new().map_err(ChatError::generic)?,
++        };
+         let causal = CausalHistoryStore::new();
+         let pq_inbox = InboxV2::new(ident_id);
+ 
+@@ -180,7 +192,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+     /// Idempotent on the server side (registries that retain history will keep
+     /// the most recent N submissions; older entries are pruned).
+     pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
+-        self.pq_inbox.register(&mut self.services)
++        self.pq_inbox.register(&mut self.services)?;
++        // The key package's private init key lives in the MLS provider's
++        // storage; a peer's welcome is undecryptable without it, so checkpoint
++        // right away rather than waiting for the next conversation operation.
++        self.persist_mls_state()
++    }
++
++    /// Checkpoints the MLS provider's state into the (encrypted) store.
++    ///
++    /// The MLS provider keeps group state in memory; without this the state is
++    /// gone at the next open and every conversation created in an earlier
++    /// session fails to load. Every MLS-mutating entry point on `Core` calls
++    /// this itself; it is public so an embedder can also checkpoint explicitly
++    /// (e.g. before a process is about to be killed).
++    pub fn persist_mls_state(&mut self) -> Result<(), ChatError> {
++        let blob = serialize_storage(self.services.mls_provider.storage())?;
++        self.services.store.save_mls_state(&blob)?;
++        Ok(())
+     }
+ 
+     pub fn installation_name(&self) -> &str {
+@@ -204,7 +233,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+     ) -> Result<ConversationId, ChatError> {
+         let convo = DirectV1Convo::new(&mut self.services, members)?;
+         let convo_id = convo.id().to_string();
++        // A DirectV1 delegates to a GroupV1, so it is persisted (and rebuilt by
++        // `load_mls_convo`) as one. Without this row the conversation exists
++        // only in this session's cache and a later run reports `NoConvo`.
++        self.services
++            .store
++            .save_conversation(&storage::ConversationMeta {
++                local_convo_id: convo_id.clone(),
++                remote_convo_id: "0".into(),
++                kind: ConversationKind::GroupV1,
++            })?;
+         self.register_convo(ConvoTypeOwned::Direct(Box::new(convo)))?;
++        self.persist_mls_state()?;
+ 
+         Ok(convo_id)
+     }
+@@ -235,6 +275,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         let convo_id = convo.id().to_string();
+ 
+         self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
++        self.persist_mls_state()?;
+ 
+         Ok(convo_id)
+     }
+@@ -252,7 +293,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         convo.add_member(&mut self.services, participants)?;
+         let convo_id = convo.id().to_string();
+ 
++        // Recorded so the conversation is still listed after a restart. NOTE:
++        // a GroupV2 cannot yet be *rebuilt* from this row — de-mls'
++        // `Conversation` only has `create`/`join`, no load — so `load_convo`
++        // reports an explicit `UnsupportedConvoType` rather than a misleading
++        // `NoConvo`. See the GroupV2 arm in `load_convo`.
++        self.services
++            .store
++            .save_conversation(&storage::ConversationMeta {
++                local_convo_id: convo_id.clone(),
++                remote_convo_id: "0".into(),
++                kind: ConversationKind::GroupV2,
++            })?;
+         self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
++        self.persist_mls_state()?;
+ 
+         Ok(convo_id)
+     }
+@@ -262,6 +316,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         &mut self,
+         convo_id: &str,
+         members: &[IdentIdRef],
++    ) -> Result<(), ChatError> {
++        let result = self.group_add_member_inner(convo_id, members);
++        // Checkpoint even on failure: a partially applied add still mutated the
++        // MLS state, and losing that would desynchronize us from the peers that
++        // did receive the commit.
++        self.persist_mls_state()?;
++        result
++    }
++
++    fn group_add_member_inner(
++        &mut self,
++        convo_id: &str,
++        members: &[IdentIdRef],
+     ) -> Result<(), ChatError> {
+         if self.cached_convos.contains_key(convo_id) {
+             let convo = self
+@@ -333,6 +400,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+ 
+     /// Encrypt and publish `content` to an existing conversation.
+     pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
++        let result = self.send_content_inner(convo_id, content);
++        self.persist_mls_state()?;
++        result
++    }
++
++    fn send_content_inner(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
+         if self.cached_convos.contains_key(convo_id) {
+             let convo = self
+                 .cached_convos
+@@ -345,9 +418,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         }
+     }
+ 
++    /// Decode bytes and send to protocol for processing, then checkpoint: an
++    /// inbound frame can create a conversation (a welcome), merge a commit or
++    /// ratchet a group forward, all of which live in the MLS provider's state.
++    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
++        let result = self.handle_payload_inner(payload);
++        self.persist_mls_state()?;
++        result
++    }
++
+     // Decode bytes and send to protocol for processing.
+     #[instrument(name = "core.handle_frame", skip_all, fields(user_id = %self.services.mls_identity.display_name()))]
+-    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
++    fn handle_payload_inner(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
+         let env = EnvelopeV1::decode(payload)?;
+ 
+         // TODO: Impl Conversation hinting
+@@ -403,6 +485,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+     }
+ 
+     pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
++        let result = self.wakeup_inner(convo_id);
++        self.persist_mls_state()?;
++        result
++    }
++
++    fn wakeup_inner(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
+         info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
+ 
+         match convo_id {
+@@ -440,6 +528,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         let record = self.load_conversation_meta(convo_id)?;
+         Ok(match record.kind {
+             ConversationKind::GroupV1 => Box::new(self.load_mls_convo(&record.local_convo_id)?),
++            ConversationKind::GroupV2 => return Err(group_v2_not_reloadable()),
+             ConversationKind::Unknown(_) => {
+                 return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
+             }
+@@ -451,6 +540,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         let record = self.load_conversation_meta(convo_id)?;
+         match record.kind {
+             ConversationKind::GroupV1 => Ok(Box::new(self.load_mls_convo(&record.local_convo_id)?)),
++            ConversationKind::GroupV2 => Err(group_v2_not_reloadable()),
+             ConversationKind::Unknown(_) => {
+                 Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
+             }
+@@ -493,6 +583,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+     }
+ }
+ 
++/// A GroupV2 row exists in the store (so the conversation is still listed), but
++/// the de-mls `Conversation` behind it only offers `create`/`join` — there is no
++/// load path, so it cannot be rebuilt in a later session. Say so explicitly
++/// instead of surfacing a misleading "not found".
++fn group_v2_not_reloadable() -> ChatError {
++    ChatError::UnsupportedConvoType(
++        "group_v2 cannot be rebuilt from storage: de-mls has no load path (rejoin the group)".into(),
++    )
++}
++
+ enum ConvoTypeOwned<S: ExternalServices> {
+     Direct(Box<dyn Convo<S>>),
+     Group(Box<dyn GroupConvo<S>>),
+diff --git a/core/conversations/src/inbox_v2.rs b/core/conversations/src/inbox_v2.rs
+index ff63d7d..cf121cd 100644
+--- a/core/conversations/src/inbox_v2.rs
++++ b/core/conversations/src/inbox_v2.rs
+@@ -11,7 +11,9 @@ use tracing::info;
+ use tracing::instrument;
+ 
+ pub use identity::MlsIdentityProvider;
+-pub(crate) use mls_provider::MlsEphemeralPqProvider;
++pub(crate) use mls_provider::{
++    MlsEphemeralPqProvider, deserialize_storage, serialize_storage,
++};
+ 
+ use crate::ChatError;
+ use crate::DeliveryService;
+diff --git a/core/conversations/src/inbox_v2/mls_provider.rs b/core/conversations/src/inbox_v2/mls_provider.rs
+index f55f60f..0776bf8 100644
+--- a/core/conversations/src/inbox_v2/mls_provider.rs
++++ b/core/conversations/src/inbox_v2/mls_provider.rs
+@@ -21,13 +21,87 @@ pub struct MlsEphemeralPqProvider {
+ 
+ impl MlsEphemeralPqProvider {
+     pub fn new() -> Result<Self, CryptoError> {
++        Self::from_storage(MemoryStorage::default())
++    }
++
++    /// Builds the provider over an already populated storage — the restore path
++    /// for a `MemoryStorage` rehydrated from a persisted blob (see
++    /// [`deserialize_storage`]). Only the crypto provider is fresh; every MLS
++    /// group, key package and signature key the store held stays addressable.
++    pub fn from_storage(storage: MemoryStorage) -> Result<Self, CryptoError> {
+         let crypto = LibcruxCryptoProvider::new()?;
+-        let storage = MemoryStorage::default();
+ 
+         Ok(Self { crypto, storage })
+     }
+ }
+ 
++/// Serializes openmls' own key-value store verbatim.
++///
++/// Layout (matching `MemoryStorage::serialize`, which upstream gates behind its
++/// test-only `test-utils` feature): a big-endian `u64` entry count, then per
++/// entry a `u64` key length, a `u64` value length, the key bytes and the value
++/// bytes. Re-implemented over the public `values` map so the persistence path
++/// carries no test-only feature — and so no `StorageProvider` has to be
++/// hand-written.
++pub fn serialize_storage(storage: &MemoryStorage) -> Result<Vec<u8>, ChatError> {
++    let values = storage
++        .values
++        .read()
++        .map_err(|_| ChatError::generic("mls storage lock poisoned"))?;
++
++    let mut out = Vec::new();
++    out.extend_from_slice(&(values.len() as u64).to_be_bytes());
++    for (key, value) in values.iter() {
++        out.extend_from_slice(&(key.len() as u64).to_be_bytes());
++        out.extend_from_slice(&(value.len() as u64).to_be_bytes());
++        out.extend_from_slice(key);
++        out.extend_from_slice(value);
++    }
++    Ok(out)
++}
++
++/// Rebuilds a `MemoryStorage` from a blob written by [`serialize_storage`].
++/// A malformed blob is an error rather than a silent reset: dropping the MLS
++/// state would strand every conversation the store already knows about.
++pub fn deserialize_storage(blob: &[u8]) -> Result<MemoryStorage, ChatError> {
++    fn take<'a>(rest: &mut &'a [u8], n: usize) -> Result<&'a [u8], ChatError> {
++        if rest.len() < n {
++            return Err(ChatError::generic("truncated mls state blob"));
++        }
++        let (head, tail) = rest.split_at(n);
++        *rest = tail;
++        Ok(head)
++    }
++
++    fn take_u64(rest: &mut &[u8]) -> Result<u64, ChatError> {
++        let bytes: [u8; 8] = take(rest, 8)?
++            .try_into()
++            .map_err(|_| ChatError::generic("truncated mls state blob"))?;
++        Ok(u64::from_be_bytes(bytes))
++    }
++
++    let mut rest = blob;
++    let count = take_u64(&mut rest)?;
++    let mut map = std::collections::HashMap::new();
++    for _ in 0..count {
++        let key_len = take_u64(&mut rest)? as usize;
++        let value_len = take_u64(&mut rest)? as usize;
++        let key = take(&mut rest, key_len)?.to_vec();
++        let value = take(&mut rest, value_len)?.to_vec();
++        map.insert(key, value);
++    }
++
++    let storage = MemoryStorage::default();
++    {
++        let mut values = storage
++            .values
++            .write()
++            .map_err(|_| ChatError::generic("mls storage lock poisoned"))?;
++        *values = map;
++    }
++    Ok(storage)
++}
++
+ impl MlsProvider for MlsEphemeralPqProvider {
+     fn invite_user<DS: DeliveryService>(
+         &self,
+diff --git a/core/conversations/src/outcomes.rs b/core/conversations/src/outcomes.rs
+index 18877e7..afca93e 100644
+--- a/core/conversations/src/outcomes.rs
++++ b/core/conversations/src/outcomes.rs
+@@ -78,7 +78,7 @@ impl ConversationClass {
+     /// `Unknown(_)` yields `None`.
+     pub fn from_kind(kind: &ConversationKind) -> Option<Self> {
+         match kind {
+-            ConversationKind::GroupV1 => Some(Self::Group),
++            ConversationKind::GroupV1 | ConversationKind::GroupV2 => Some(Self::Group),
+             ConversationKind::Unknown(_) => None,
+         }
+     }
 diff --git a/core/crypto/src/signatures.rs b/core/crypto/src/signatures.rs
 index bba6e10..f8d4ee4 100644
 --- a/core/crypto/src/signatures.rs
@@ -75,6 +413,239 @@ index bba6e10..f8d4ee4 100644
      pub fn sign(&self, msg: &[u8]) -> Ed25519Signature {
          self.0.sign(msg).to_bytes().into()
      }
+diff --git a/core/sqlite/src/lib.rs b/core/sqlite/src/lib.rs
+index b021965..fb42c1e 100644
+--- a/core/sqlite/src/lib.rs
++++ b/core/sqlite/src/lib.rs
+@@ -11,7 +11,7 @@ use crypto::{Identity, PrivateKey};
+ use rusqlite::{Transaction, params};
+ use storage::{
+     ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+-    RatchetStateRecord, RatchetStore, SkippedKeyRecord, StorageError,
++    MlsStateStore, RatchetStateRecord, RatchetStore, SkippedKeyRecord, StorageError,
+ };
+ use zeroize::Zeroize;
+ 
+@@ -114,6 +114,40 @@ impl IdentityStore for ChatStorage {
+     }
+ }
+ 
++impl MlsStateStore for ChatStorage {
++    /// Saves the MLS provider's serialized state as the single `mls_state` row.
++    ///
++    /// The blob carries MLS private key material, so it lives in this database
++    /// (encrypted under `StorageConfig::Encrypted`) exactly like the identity's
++    /// secret key does — never in a plaintext sidecar.
++    fn save_mls_state(&mut self, blob: &[u8]) -> Result<(), StorageError> {
++        self.db
++            .connection()
++            .execute(
++                "INSERT INTO mls_state (id, state, updated_at)
++                 VALUES (1, ?1, strftime('%s', 'now'))
++                 ON CONFLICT(id) DO UPDATE SET
++                     state = excluded.state,
++                     updated_at = excluded.updated_at",
++                params![blob],
++            )
++            .map_err(map_rusqlite_error)?;
++        Ok(())
++    }
++
++    /// Loads the MLS provider's serialized state, if one was ever saved.
++    fn load_mls_state(&self) -> Result<Option<Vec<u8>>, StorageError> {
++        let mut stmt = self
++            .db
++            .connection()
++            .prepare("SELECT state FROM mls_state WHERE id = 1")
++            .map_err(map_rusqlite_error)?;
++
++        let result = stmt.query_row([], |row| row.get::<_, Vec<u8>>(0));
++        map_optional_row(result)
++    }
++}
++
+ impl EphemeralKeyStore for ChatStorage {
+     /// Saves an ephemeral key pair to storage.
+     fn save_ephemeral_key(
+@@ -536,11 +570,29 @@ fn blob_to_array<const N: usize>(
+ mod tests {
+     use storage::{
+         ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
+-        RatchetStore,
++        MlsStateStore, RatchetStore,
+     };
+ 
+     use super::*;
+ 
++    #[test]
++    fn test_mls_state_roundtrip() {
++        let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
++
++        // Initially absent.
++        assert!(storage.load_mls_state().unwrap().is_none());
++
++        storage.save_mls_state(b"blob-one").unwrap();
++        assert_eq!(storage.load_mls_state().unwrap().unwrap(), b"blob-one");
++
++        // Overwrites in place (single row).
++        storage.save_mls_state(b"blob-two-longer").unwrap();
++        assert_eq!(
++            storage.load_mls_state().unwrap().unwrap(),
++            b"blob-two-longer"
++        );
++    }
++
+     #[test]
+     fn test_identity_roundtrip() {
+         let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+diff --git a/core/sqlite/src/migrations.rs b/core/sqlite/src/migrations.rs
+index 439f9fc..fafc016 100644
+--- a/core/sqlite/src/migrations.rs
++++ b/core/sqlite/src/migrations.rs
+@@ -19,6 +19,10 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
+             "002_ratchet_state",
+             include_str!("migrations/002_ratchet_state.sql"),
+         ),
++        (
++            "003_mls_state",
++            include_str!("migrations/003_mls_state.sql"),
++        ),
+     ]
+ }
+ 
+diff --git a/core/sqlite/src/migrations/003_mls_state.sql b/core/sqlite/src/migrations/003_mls_state.sql
+new file mode 100644
+index 0000000..fcd0d21
+--- /dev/null
++++ b/core/sqlite/src/migrations/003_mls_state.sql
+@@ -0,0 +1,11 @@
++-- MLS provider state.
++--
++-- The MLS provider keeps its group state (and the private key material it
++-- references) in an in-memory key-value store. This single row holds that
++-- store serialized verbatim, so conversations survive a restart. It is secret
++-- material, hence this encrypted database rather than a sidecar file.
++CREATE TABLE IF NOT EXISTS mls_state (
++    id INTEGER PRIMARY KEY CHECK (id = 1),
++    state BLOB NOT NULL,
++    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
++);
+diff --git a/core/storage/src/lib.rs b/core/storage/src/lib.rs
+index 6c8f367..653dd57 100644
+--- a/core/storage/src/lib.rs
++++ b/core/storage/src/lib.rs
+@@ -11,5 +11,5 @@ mod store;
+ pub use errors::StorageError;
+ pub use store::{
+     ChatStore, ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore,
+-    IdentityStore, RatchetStateRecord, RatchetStore, SkippedKeyRecord,
++    IdentityStore, MlsStateStore, RatchetStateRecord, RatchetStore, SkippedKeyRecord,
+ };
+diff --git a/core/storage/src/store.rs b/core/storage/src/store.rs
+index d05b05a..0f74993 100644
+--- a/core/storage/src/store.rs
++++ b/core/storage/src/store.rs
+@@ -23,10 +23,26 @@ pub trait EphemeralKeyStore {
+     fn remove_ephemeral_key(&mut self, public_key_hex: &str) -> Result<(), StorageError>;
+ }
+ 
++/// Persistence for the MLS provider's own key-value state.
++///
++/// The blob is opaque here: it is whatever the MLS provider's storage
++/// serializes to, saved verbatim so the openmls group state (and the private
++/// key material it references) survives a restart. It holds secrets, so it
++/// belongs in the same encrypted store as the identity — never a plaintext
++/// sidecar file.
++pub trait MlsStateStore {
++    /// Persists the MLS provider's serialized state, replacing any earlier one.
++    fn save_mls_state(&mut self, blob: &[u8]) -> Result<(), StorageError>;
++
++    /// Loads the MLS provider's serialized state, if one was ever saved.
++    fn load_mls_state(&self) -> Result<Option<Vec<u8>>, StorageError>;
++}
++
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub enum ConversationKind {
+     Unknown(String),
+     GroupV1,
++    GroupV2,
+ }
+ 
+ impl ConversationKind {
+@@ -34,6 +50,7 @@ impl ConversationKind {
+         match self {
+             Self::Unknown(value) => value.as_str(),
+             Self::GroupV1 => "group_v1",
++            Self::GroupV2 => "group_v2",
+         }
+     }
+ }
+@@ -42,6 +59,7 @@ impl From<&str> for ConversationKind {
+     fn from(value: &str) -> Self {
+         match value {
+             "group_v1" => Self::GroupV1,
++            "group_v2" => Self::GroupV2,
+             other => Self::Unknown(other.to_string()),
+         }
+     }
+@@ -122,7 +140,12 @@ pub trait RatchetStore {
+ 
+ // TODO: (P2) this should be defined in the ConversationType
+ 
+-pub trait ChatStore: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore {}
++pub trait ChatStore:
++    IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore + MlsStateStore
++{
++}
+ 
+-impl<T> ChatStore for T where T: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore
+-{}
++impl<T> ChatStore for T where
++    T: IdentityStore + EphemeralKeyStore + ConversationStore + RatchetStore + MlsStateStore
++{
++}
+diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
+index a684ecd..4df6669 100644
+--- a/crates/generic-chat/src/client.rs
++++ b/crates/generic-chat/src/client.rs
+@@ -114,10 +114,20 @@ where
+         let wakeup_service = ThreadedWakeupService::new(wakeup_tx);
+         let directory = reg.clone();
+         let ident = DelegateIdentity::new(ident, &account);
+-        let mut core = Core::new_with_name(ident, transport, reg, wakeup_service, storage)?;
++        // The persistent constructor: it restores the installation identity from
++        // the store (creating and saving one only on a first run), where
++        // `Core::new_with_name` — the testing constructor — always mints a fresh
++        // one. `assemble` also rehydrates the MLS provider's state from the
++        // store, so conversations from an earlier session stay loadable.
++        let mut core = Core::new_from_store(ident, transport, reg, wakeup_service, storage)?;
+         if let Some(config) = group_v2 {
+             core.set_group_v2_config(config);
+         }
++        // `new_from_store` does not register, so do it here to keep the
++        // published key package fresh on every open (the registry keeps the
++        // most recent submissions). `register_keypackage` checkpoints the MLS
++        // state itself, so the new key package's private init key is persisted.
++        core.register_keypackage()?;
+         Ok(Self::spawn(core, directory, account, inbound, wakeup_rx))
+     }
+ 
+@@ -246,6 +256,15 @@ where
+             .map_err(Into::into)
+     }
+ 
++    /// Checkpoint the MLS state into the encrypted store.
++    ///
++    /// Every conversation operation already checkpoints, so this is only needed
++    /// when an embedder wants an explicit flush — e.g. an Android app about to
++    /// be killed in the background.
++    pub fn persist_mls_state(&mut self) -> Result<(), ClientError> {
++        self.core.lock().persist_mls_state().map_err(Into::into)
++    }
++
+     /// List all conversation IDs known to this client.
+     pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
+         self.core.lock().list_conversations().map_err(Into::into)
 diff --git a/crates/generic-chat/src/delegate.rs b/crates/generic-chat/src/delegate.rs
 index a8ea88c..45408fa 100644
 --- a/crates/generic-chat/src/delegate.rs
@@ -192,6 +763,47 @@ index a5d87ca..f5c6915 100644
  /// The Logos client: a [`ChatClient`] wired to the Logos service stack — a
  /// [`DelegateSigner`] identity acting for a fresh dev account, the HTTP
  /// keypackage + account registry ([`HttpRegistry`], which is both the
+diff --git a/extensions/components/src/storage/in_memory_store.rs b/extensions/components/src/storage/in_memory_store.rs
+index 2bf84f9..009d6ea 100644
+--- a/extensions/components/src/storage/in_memory_store.rs
++++ b/extensions/components/src/storage/in_memory_store.rs
+@@ -6,22 +6,36 @@ use storage::{
+     ConversationStore,
+     EphemeralKeyStore,
+     IdentityStore,
++    MlsStateStore,
+     RatchetStore,
+ };
+ 
+ /// An Test focused StorageService which holds data in a hashmap
+ pub struct MemStore {
+     convos: HashMap<String, ConversationMeta>,
++    mls_state: Option<Vec<u8>>,
+ }
+ 
+ impl MemStore {
+     pub fn new() -> Self {
+         Self {
+             convos: HashMap::new(),
++            mls_state: None,
+         }
+     }
+ }
+ 
++impl MlsStateStore for MemStore {
++    fn save_mls_state(&mut self, blob: &[u8]) -> Result<(), storage::StorageError> {
++        self.mls_state = Some(blob.to_vec());
++        Ok(())
++    }
++
++    fn load_mls_state(&self) -> Result<Option<Vec<u8>>, storage::StorageError> {
++        Ok(self.mls_state.clone())
++    }
++}
++
+ impl Default for MemStore {
+     fn default() -> Self {
+         Self::new()
 diff --git a/extensions/logos-delivery-rust/build.rs b/extensions/logos-delivery-rust/build.rs
 index e015061..85ee0cc 100644
 --- a/extensions/logos-delivery-rust/build.rs

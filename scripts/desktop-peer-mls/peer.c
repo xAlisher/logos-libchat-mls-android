@@ -15,6 +15,7 @@
 //   send <convoId> <utf8...>      -> send_message(convoId, bytes)         (1:1)
 //   newgroup <name> | <desc>      -> create_group(name, desc) -> print groupId   (desc after a literal " | ")
 //   addmember <groupId> <addr>    -> add_group_member(groupId, addr)
+//   leave <groupId>               -> leave_group(groupId): remove SELF from the group
 //   groupsend <groupId> <utf8...> -> send_message(groupId, bytes)         (same verb as send; kept for clarity)
 //   list                          -> list_conversations() -> print JSON array
 //   quit                          -> shutdown + exit
@@ -38,6 +39,7 @@ typedef char *(*strv_fn)(void *);
 typedef char *(*create_convo_fn)(void *, const char *);
 typedef char *(*create_group_fn)(void *, const char *, const char *);
 typedef int (*add_member_fn)(void *, const char *, const char *);
+typedef int (*leave_group_fn)(void *, const char *);
 typedef int (*send_fn)(void *, const char *, const unsigned char *, size_t);
 typedef char *(*list_fn)(void *);
 typedef const char *(*err_fn)(void);
@@ -97,6 +99,7 @@ int main(int argc, char **argv) {
   create_convo_fn f_newconvo = (create_convo_fn)dlsym(h, "logoschat_create_conversation");
   create_group_fn f_newgroup = (create_group_fn)dlsym(h, "logoschat_create_group");
   add_member_fn f_addmember = (add_member_fn)dlsym(h, "logoschat_add_group_member");
+  leave_group_fn f_leave = (leave_group_fn)dlsym(h, "logoschat_leave_group");
   send_fn f_send = (send_fn)dlsym(h, "logoschat_send_message");
   list_fn f_list = (list_fn)dlsym(h, "logoschat_list_conversations");
   set_event_cb_fn f_setev = (set_event_cb_fn)dlsym(h, "logoschat_set_event_callback");
@@ -174,6 +177,16 @@ int main(int argc, char **argv) {
       char *peer = sp + 1;
       int rc = f_addmember(H, gid, peer);
       printf("ADDMEMBER rc=%d%s\n", rc, rc != 0 && xerr ? xerr() : "");
+
+    } else if (strncmp(line, "leave ", 6) == 0) {
+      char *gid = line + 6;
+      char *sp = strchr(gid, ' ');
+      if (sp) *sp = 0;
+      if (!f_leave) { printf("ERR leave: logoschat_leave_group not exported by this .so\n"); continue; }
+      int rc = f_leave(H, gid);
+      // Print the error verbatim whatever the rc — a leave that opens a
+      // consensus round can still report a retry-later condition.
+      printf("LEAVE rc=%d last_error=\"%s\"\n", rc, xerr ? xerr() : "(no last_error symbol)");
 
     } else if (strncmp(line, "send ", 5) == 0 || strncmp(line, "groupsend ", 10) == 0) {
       int off = (line[0] == 'g') ? 10 : 5;

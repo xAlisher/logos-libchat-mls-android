@@ -50,8 +50,89 @@ index 0b3950d..c0edd01 100644
  base64 = "0.22"
  chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "37ec98a151f6d50aab2905802ac0a896477e62ea" }
  de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "2c7a8669c1492c749c02efd2c5ac45e93e4926a3"} # Expose Mls Extensions (#131)
+diff --git a/core/conversations/src/conversation.rs b/core/conversations/src/conversation.rs
+index 3581eba..3d6dfd4 100644
+--- a/core/conversations/src/conversation.rs
++++ b/core/conversations/src/conversation.rs
+@@ -48,6 +48,16 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
+     /// Each current member's MLS leaf-credential content (hex-encoded), self
+     /// included.
+     fn members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
++
++    /// Remove SELF from the group (leave). Default: unsupported — only the
++    /// conversation kinds that model self-removal override this.
++    fn leave(&mut self, _cx: &mut ServiceContext<S>) -> Result<(), ChatError> {
++        Err(ChatError::UnsupportedFunction(
++            self.id().to_string(),
++            "Leave Group".into(),
++        ))
++    }
++
+     // All GroupConvos MUST return ConvoMetadata
+     // the return type is Option<_> to support legacy ConvoTypes which
+     // are being phased out.
+diff --git a/core/conversations/src/conversation/group_v2.rs b/core/conversations/src/conversation/group_v2.rs
+index c547e5a..17aa209 100644
+--- a/core/conversations/src/conversation/group_v2.rs
++++ b/core/conversations/src/conversation/group_v2.rs
+@@ -14,7 +14,8 @@ use de_mls::protos::de_mls::messages::v1::{
+     AppMessage as AppMessageProto, MemberWelcome, app_message,
+ };
+ use de_mls::{
+-    Conversation, ConversationEvent, MockClock, PeerScoringService, ScoringConfig, WallClock,
++    Conversation, ConversationError, ConversationEvent, MockClock, PeerScoringService,
++    ScoringConfig, WallClock,
+     default_score_deltas,
+     defaults::{DefaultConsensusPlugin, DefaultPeerScoring, InMemoryPeerScoreStorage},
+ };
+@@ -66,6 +67,20 @@ fn member_id<S: ExternalServices>(service_ctx: &ServiceContext<S>) -> Vec<u8> {
+     service_ctx.mls_identity.id().as_str().as_bytes().to_vec()
+ }
+ 
++/// A leave opens a consensus round, and de-mls only accepts a new round while
++/// the conversation is `Working`: mid-round (a vote or commit still in flight)
++/// it answers `ConversationBlocked(<state>)`. That is a retry-later condition,
++/// not a failure of the request, so say so instead of leaking the raw variant.
++fn map_leave_error(err: ConversationError) -> ChatError {
++    match err {
++        ConversationError::ConversationBlocked(state) => ChatError::Generic(format!(
++            "cannot leave right now: the group is mid consensus round (state: {state}); \
++             retry once it returns to Working"
++        )),
++        other => other.into(),
++    }
++}
++
+ /// `app_id` for outbound packets / echo-dedup — random per conversation.
+ fn rand_app_id() -> Arc<[u8]> {
+     Arc::from(rand_string(5).as_bytes())
+@@ -376,6 +391,24 @@ where
+         result.and(flushed)
+     }
+ 
++    /// Leave the group: open a `RemoveMember` consensus round targeting OUR OWN
++    /// member id. de-mls models self-removal (`leave_or_update(self_removed)`),
++    /// so the round is the ordinary removal round with us as the target; the
++    /// commit that ejects us lands asynchronously (`wakeup` reports it via
++    /// `leave_requested`), not when this call returns.
++    #[instrument(name = "groupv2.leave", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
++    fn leave(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<(), ChatError> {
++        let me = member_id(service_ctx);
++        let result = self
++            .conversation
++            .remove_member(&service_ctx.mls_provider, &service_ctx.mls_identity, &me)
++            .map_err(map_leave_error);
++        // Flush even on failure, exactly as add_member does: a round that did
++        // open must be published and the wakeup re-armed.
++        let flushed = self.after_op(service_ctx).map(drop);
++        result.and(flushed)
++    }
++
+     fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
+         // Guarantee the local member is listed so callers see the full roster.
+         let mut members = self.conversation.members()?;
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
-index 99ad312..53203eb 100644
+index 99ad312..e8147df 100644
 --- a/core/conversations/src/core.rs
 +++ b/core/conversations/src/core.rs
 @@ -11,16 +11,20 @@ use crate::{
@@ -188,7 +269,47 @@ index 99ad312..53203eb 100644
      ) -> Result<(), ChatError> {
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
-@@ -333,6 +400,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -284,6 +351,39 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         }
+     }
+ 
++    /// Leave a group conversation: remove OURSELVES from its roster.
++    ///
++    /// Only possible for a group still live in this session — a GroupV2 from an
++    /// earlier session cannot be rebuilt (see [`group_v2_not_reloadable`]), and
++    /// the cache-miss path surfaces that explicitly.
++    pub fn group_leave(&mut self, convo_id: &str) -> Result<(), ChatError> {
++        let result = self.group_leave_inner(convo_id);
++        // Checkpoint even on failure, for the same reason as group_add_member:
++        // a partially applied leave still mutated the MLS state.
++        self.persist_mls_state()?;
++        result
++    }
++
++    fn group_leave_inner(&mut self, convo_id: &str) -> Result<(), ChatError> {
++        if self.cached_convos.contains_key(convo_id) {
++            let convo = self
++                .cached_convos
++                .get_mut(convo_id)
++                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
++
++            match convo {
++                ConvoTypeOwned::Group(group_convo) => group_convo.leave(&mut self.services),
++                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
++                    convo.id().into(),
++                    "Leave Group".into(),
++                )),
++            }
++        } else {
++            let mut convo = self.load_group_convo(convo_id)?;
++            convo.leave(&mut self.services)
++        }
++    }
++
+     /// Each member's MLS leaf-credential content (hex-encoded); errors if
+     /// `convo_id` names a direct (non-group) conversation.
+     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+@@ -333,6 +433,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
  
      /// Encrypt and publish `content` to an existing conversation.
      pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
@@ -201,7 +322,7 @@ index 99ad312..53203eb 100644
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
                  .cached_convos
-@@ -345,9 +418,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -345,9 +451,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          }
      }
  
@@ -221,7 +342,7 @@ index 99ad312..53203eb 100644
          let env = EnvelopeV1::decode(payload)?;
  
          // TODO: Impl Conversation hinting
-@@ -403,6 +485,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -403,6 +518,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      }
  
      pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
@@ -234,7 +355,7 @@ index 99ad312..53203eb 100644
          info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
  
          match convo_id {
-@@ -440,6 +528,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -440,6 +561,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          Ok(match record.kind {
              ConversationKind::GroupV1 => Box::new(self.load_mls_convo(&record.local_convo_id)?),
@@ -242,7 +363,7 @@ index 99ad312..53203eb 100644
              ConversationKind::Unknown(_) => {
                  return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
              }
-@@ -451,6 +540,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -451,6 +573,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          match record.kind {
              ConversationKind::GroupV1 => Ok(Box::new(self.load_mls_convo(&record.local_convo_id)?)),
@@ -250,7 +371,7 @@ index 99ad312..53203eb 100644
              ConversationKind::Unknown(_) => {
                  Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
              }
-@@ -493,6 +583,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -493,6 +616,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      }
  }
  
@@ -605,7 +726,7 @@ index d05b05a..0f74993 100644
 +{
 +}
 diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
-index a684ecd..4df6669 100644
+index a684ecd..16274f1 100644
 --- a/crates/generic-chat/src/client.rs
 +++ b/crates/generic-chat/src/client.rs
 @@ -114,10 +114,20 @@ where
@@ -630,7 +751,28 @@ index a684ecd..4df6669 100644
          Ok(Self::spawn(core, directory, account, inbound, wakeup_rx))
      }
  
-@@ -246,6 +256,15 @@ where
+@@ -222,6 +232,20 @@ where
+             .map_err(Into::into)
+     }
+ 
++    /// Leave a group conversation: stage the removal of THIS client from the
++    /// group's roster. Like [`Self::add_group_members`] the removal runs as a
++    /// consensus round — it is merged by the group's next commit, not when this
++    /// call returns.
++    ///
++    /// Two honest constraints:
++    /// * the round only opens while the conversation is `Working`; mid-round the
++    ///   call fails with a retry-later error;
++    /// * a GroupV2 created or joined in a PREVIOUS session cannot be rebuilt
++    ///   from storage, so it cannot be left — the call reports that explicitly.
++    pub fn leave_group(&mut self, convo_id: &str) -> Result<(), ClientError> {
++        self.core.lock().group_leave(convo_id).map_err(Into::into)
++    }
++
+     /// The group's roster, one [`GroupMember`] per account (self included). An
+     /// account's several devices collapse to a single entry surfacing that
+     /// account; a member whose account claim the directory can't confirm stays
+@@ -246,6 +270,15 @@ where
              .map_err(Into::into)
      }
  

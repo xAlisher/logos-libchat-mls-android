@@ -257,3 +257,122 @@ return an explicit `unsupported conversation type: group_v2 cannot be rebuilt fr
 storage: de-mls has no load path (rejoin the group)` instead of a misleading
 "not found". Groups surviving a restart needs a load/serialize path upstream in
 de-mls (or moving groups onto GroupV1, which does rehydrate).
+
+---
+
+## Node 8 — leave group (self-removal), verb #15 (2026-07-24)
+
+**Idea.** The ABI could add members but never drop one — including yourself.
+de-mls already models self-removal (`commit_round/apply.rs: leave_or_update(self_removed)`),
+so a leave is the ordinary `Conversation::remove_member` round pointed at OUR OWN
+member id — the value `group_v2.rs`'s existing `member_id(service_ctx)` helper
+already returns.
+
+**Move (additive, four layers + the header):**
+- `core/conversations/src/conversation.rs` — `GroupConvo::leave(&mut self, cx)`
+  with a default impl returning `UnsupportedFunction`, so only the kinds that
+  model self-removal opt in (GroupV1 keeps the default).
+- `core/conversations/src/conversation/group_v2.rs` — `GroupV2Convo::leave`
+  calls `conversation.remove_member(provider, signer, &member_id(cx))`, then
+  flushes through `after_op` even on failure (exactly as `add_member` does: a
+  round that did open must be published and the wakeup re-armed). A new
+  `map_leave_error` turns de-mls' `ConversationError::ConversationBlocked(state)`
+  into a plain retry-later string instead of leaking the raw variant.
+- `core/conversations/src/core.rs` — `Core::group_leave(convo_id)`, mirroring
+  `group_add_member`: cache hit → leave; cache miss → the existing load path;
+  `persist_mls_state()` afterwards either way (a partly applied leave still
+  mutated MLS state).
+- `crates/generic-chat/src/client.rs` — `ChatClient::leave_group(convo_id)`.
+- `wrapper/src/lib.rs` + `include/liblogoschat.h` —
+  `int logoschat_leave_group(void *handle, const char *convo_id)`, same contract
+  as `logoschat_add_group_member` (0 = ok, -1 = error, text via
+  `logoschat_last_error`). **ABI goes 14 → 15 exports.**
+
+**What leave actually does.** It does NOT remove you synchronously. It opens a
+`RemoveMember` consensus round with you as the target and publishes the round's
+frame to the group's delivery address; the commit that ejects you lands
+asynchronously (`wakeup` surfaces it as `leave_requested`). `rc=0` therefore means
+"the round opened and was published", not "you are out".
+
+**Two honest constraints (say them in the UI, don't paper over them):**
+1. **Consensus round.** de-mls only accepts a new round while the conversation is
+   `ConversationState::Working`. Mid-round (a vote or commit in flight) it answers
+   `ConversationBlocked(<state>)`, which we surface as
+   `cannot leave right now: the group is mid consensus round (state: …); retry once
+   it returns to Working`. This is retry-later, not a hard failure.
+2. **Only for a group live in THIS session.** GroupV2 still cannot be rebuilt from
+   storage (de-mls has no load path — see the WALL above), so a group created or
+   joined in a previous session cannot be left: the cache-miss path returns
+   `unsupported conversation type: group_v2 cannot be rebuilt from storage: de-mls
+   has no load path (rejoin the group)`. A durable leave needs a de-mls load/
+   serialize path upstream.
+
+**Proof (host x86_64, headless).** `scripts/desktop-peer-mls/peer.c` gained a
+`leave <groupId>` command. Driving it over the real delivery node:
+`newgroup` → `GROUP: 7af3669447`, then `leave 7af3669447` →
+`LEAVE rc=0 last_error=""`, immediately preceded in the node log by
+`start publish Waku message … contentTopic=/logos-chat/1/01ab1eb30b80/proto` —
+i.e. the verb reached de-mls, the round opened, and its frame went out on the
+group's delivery address. A bogus id gives
+`leave_group failed: convo with id: PLACEHOLDER was not found`, so the not-found
+path is distinct from the protocol path. `cargo test --release --workspace`: 130
+passed, 0 failed. arm64 build: 15 `logoschat_*` exports.
+
+---
+
+## Node 9 — group metadata (name + description), verb #16 (2026-07-24)
+
+**The belief that was wrong.** We had assumed a device that *joined* a group never
+learns the group's real name, because the `conversation_started` event carries only
+`convoId` + `class` — so the app fell back to a placeholder name for joined groups.
+That assumption is **false**.
+
+**Where the name actually lives.** The group's name and description are an **MLS
+group extension** (`GROUP_METADATA_EXTENSION_TYPE`, `core/conversations/src/
+conversation/mls_extensions.rs`), i.e. part of the group *state* every member
+holds. It is set at creation (`create_group_convo_v2(&signers, name, desc)`) and
+rides to every joiner **in the welcome** — so a joiner holds exactly the values the
+creator set. Desktop Basecamp already reads it; that is why the name we set on the
+phone showed up correctly there.
+
+It was public all the way up in upstream `d2124fd`, we simply never exposed it:
+- `core/conversations/src/conversation/group_v2.rs` — `fn metadata(&self) -> Option<ConvoMetadata>` (reads the extension)
+- `core/conversations/src/types.rs` — `pub struct ConvoMetadata { pub name, pub desc }`
+- `core/conversations/src/core.rs` — `pub fn convo_metadata(&self, convo_id)`
+- `crates/generic-chat/src/client.rs` — `pub fn group_metadata(&self, convo_id) -> Result<ConvoMetadata, ClientError>`
+
+**Move (wrapper-only — NO libchat source change).** Unlike Node 8, nothing had to
+be added to the fork: `logos_chat` re-exports `logos_generic_chat::*`, so
+`ConvoMetadata` and `ChatClient::group_metadata` are already reachable from the
+wrapper crate. `patches/libchat-android-arm64.patch` is **unchanged** by this node.
+
+- `wrapper/src/lib.rs` — `logoschat_group_metadata(handle, convo_id) -> *mut c_char`,
+  returning `{"name":"…","desc":"…"}` (same allocation/error style as
+  `logoschat_list_conversations`: caller frees with `logoschat_free_string`, NULL on
+  error with the reason in `logoschat_last_error`).
+- `include/liblogoschat.h` — documented declaration. **ABI goes 15 → 16 exports**
+  (the app's JNI bridge is rebuilt separately).
+
+**Error, not an empty name.** `Core::convo_metadata` fails in three distinct ways
+and we surface all three as NULL + a message rather than an empty string:
+a **direct (1:1)** conversation → `UnsupportedFunction(convo_id, "implementation
+coming")`; a **legacy group** with no metadata extension →
+`UnsupportedConvoType("metadata is not available for this legacy convo_type")`;
+an unknown id → `NoConvo`. An empty `name` therefore means the creator really did
+pass an empty name — it never means "unknown".
+
+**Proof (host x86_64, headless).** A small dlopen driver (modeled on
+`scripts/desktop-peer-mls/peer.c`): `open_persistent` → `create_group("proof-name",
+"proof-desc")` → `logoschat_group_metadata(groupId)` returned verbatim
+`{"name":"proof-name","desc":"proof-desc"}` — matching what was passed in. The same
+verb on a **direct** conversation id returned NULL with
+`group_metadata failed: convo:<id> does not support implementation coming`.
+`cargo test --release --workspace`: 130 passed, 0 failed. arm64 build: **16**
+`logoschat_*` exports.
+
+**Side wall found while building the proof.** `logoschat_create_conversation(self)`
+— a 1:1 with your OWN address — **aborts** the process inside libchat
+(`group_v1.rs: called Result::unwrap() on Err(CreateCommitError(
+ProposalValidationError(DuplicateSignatureKey)))`; the workspace is `panic="abort"`).
+A self-conversation is not a supported shortcut for tests; use a second published
+address. Worth guarding in the app before a user can type their own address.

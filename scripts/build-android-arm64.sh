@@ -46,6 +46,11 @@ cp "$REPO_DIR/wrapper/Cargo.toml"   extensions/liblogoschat-android/Cargo.toml
 cp "$REPO_DIR/wrapper/src/lib.rs"   extensions/liblogoschat-android/src/lib.rs
 # Idempotent: skip if already applied (marker = the android arm in build.rs).
 if ! grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs; then
+  # `git checkout -f` above reverts TRACKED files but leaves the files the patch
+  # ADDS behind as untracked, so a re-run on an existing BUILD_DIR would die with
+  # "already exists in working directory". Drop exactly the patch's created files.
+  git apply --summary "$REPO_DIR/patches/libchat-android-arm64.patch" \
+    | awk '/^ create mode /{print $4}' | xargs -r rm -f
   git apply "$REPO_DIR/patches/libchat-android-arm64.patch"
 fi
 grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs \

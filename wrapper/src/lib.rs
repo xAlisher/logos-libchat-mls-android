@@ -339,6 +339,33 @@ pub unsafe extern "C" fn logoschat_add_group_member(
     }
 }
 
+/// Leave group `convo_id` (remove SELF from its roster). Returns 0 on success,
+/// -1 else. The removal is a de-mls consensus round: it is merged by the group's
+/// next commit, not when this call returns. Fails while the group is mid-round,
+/// and for a group from a previous session (GroupV2 cannot be rebuilt from
+/// storage) — `logoschat_last_error` says which.
+///
+/// # Safety
+/// `h` a valid handle; `convo_id` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_leave_group(h: *mut c_void, convo_id: *const c_char) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    let Some(convo) = cstr(convo_id) else {
+        set_last_error("convo_id null or not UTF-8");
+        return -1;
+    };
+    match h.client.leave_group(convo) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("leave_group failed: {e}"));
+            -1
+        }
+    }
+}
+
 /// List conversation ids as a JSON array string, e.g. `["id1","id2"]`. Caller frees.
 ///
 /// # Safety
@@ -356,6 +383,46 @@ pub unsafe extern "C" fn logoschat_list_conversations(h: *mut c_void) -> *mut c_
         }
         Err(e) => {
             set_last_error(format!("list_conversations failed: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// The group's shared metadata as a JSON object string,
+/// `{"name":"…","desc":"…"}`. Caller frees.
+///
+/// The name/description are set at group creation and live in an MLS group
+/// extension — part of the group state EVERY member holds, so a device that
+/// JOINED the group reads the same values the creator set (they ride along in
+/// the welcome). Either field may be empty.
+///
+/// Returns null (see `logoschat_last_error`) for a direct conversation, for a
+/// legacy group that carries no metadata extension, and for an unknown
+/// `convo_id` — an error, never an empty name.
+///
+/// # Safety
+/// `h` a valid handle; `convo_id` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_group_metadata(
+    h: *mut c_void,
+    convo_id: *const c_char,
+) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    let Some(convo) = cstr(convo_id) else {
+        set_last_error("convo_id is null or not UTF-8");
+        return ptr::null_mut();
+    };
+    match h.client.group_metadata(convo) {
+        Ok(meta) => to_c_string(format!(
+            r#"{{"name":{},"desc":{}}}"#,
+            json_str(&meta.name),
+            json_str(&meta.desc)
+        )),
+        Err(e) => {
+            set_last_error(format!("group_metadata failed: {e}"));
             ptr::null_mut()
         }
     }

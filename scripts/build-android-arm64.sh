@@ -11,6 +11,7 @@
 #   - rustup + `rustup target add aarch64-linux-android`
 #   - Android NDK r27 (ANDROID_NDK_HOME)
 #   - cmake, make, gcc, git, patch, perl  (aws-lc-rs builds via cmake)
+#   - protoc / protobuf-compiler  (hashgraph-like-consensus builds via prost)
 #
 # Output: $OUT_DIR/liblogoschat.so (stripped) + the delivery .so's + SHA256SUMS
 set -euo pipefail

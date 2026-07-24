@@ -1,0 +1,210 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 1efb279..bce2243 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -17,6 +17,7 @@ members = [
+     "extensions/components",
+     "extensions/embedded-logos-delivery",
+     "extensions/logos-delivery-rust",
++    "extensions/liblogoschat-android",
+ ]
+ 
+ default-members = [
+diff --git a/core/account/src/account.rs b/core/account/src/account.rs
+index 6f40d1c..cc9aa23 100644
+--- a/core/account/src/account.rs
++++ b/core/account/src/account.rs
+@@ -37,6 +37,18 @@ impl TestLogosAccount {
+         }
+     }
+ 
++    /// Rehydrate an account from a persisted signing key, so its address is
++    /// stable across restarts (persistent-identity path — the address is
++    /// `hex(verifying_key)`, fixed by the signing key). Pair with
++    /// [`Ed25519SigningKey::from_bytes`].
++    pub fn from_signing_key(signing_key: Ed25519SigningKey) -> Self {
++        let verifying_key = signing_key.verifying_key();
++        Self {
++            signing_key,
++            verifying_key,
++        }
++    }
++
+     /// The account verifying key; its hex is the account address peers share.
+     pub fn public_key(&self) -> &Ed25519VerifyingKey {
+         &self.verifying_key
+diff --git a/core/conversations/Cargo.toml b/core/conversations/Cargo.toml
+index 0b3950d..c0edd01 100644
+--- a/core/conversations/Cargo.toml
++++ b/core/conversations/Cargo.toml
+@@ -15,7 +15,11 @@ shared-traits = { workspace = true }
+ storage = { workspace = true }
+ 
+ # External dependencies (sorted)
+-alloy = "2.0"
++# Pared from default-features to just signer-local: conversations only uses
++# alloy::signers::local::PrivateKeySigner (group_v2.rs). Default features drag
++# in the full provider stack (tokio/hyper/reqwest-0.13) — a huge cross-compile
++# surface we don't need. See docs/build-fork-tree.md.
++alloy = { version = "2.0", default-features = false, features = ["signer-local"] }
+ base64 = "0.22"
+ chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "37ec98a151f6d50aab2905802ac0a896477e62ea" }
+ de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "2c7a8669c1492c749c02efd2c5ac45e93e4926a3"} # Expose Mls Extensions (#131)
+diff --git a/core/crypto/src/signatures.rs b/core/crypto/src/signatures.rs
+index bba6e10..f8d4ee4 100644
+--- a/core/crypto/src/signatures.rs
++++ b/core/crypto/src/signatures.rs
+@@ -37,6 +37,20 @@ impl Ed25519SigningKey {
+         Self(ed25519_dalek::SigningKey::generate(&mut OsRng))
+     }
+ 
++    /// Reconstruct a signing key from its 32-byte seed (the inverse of
++    /// [`to_bytes`](Self::to_bytes)). Enables persistent identity: save the seed,
++    /// reload it, and recover the same key (hence the same address) across
++    /// restarts.
++    pub fn from_bytes(bytes: &[u8; 32]) -> Self {
++        Self(ed25519_dalek::SigningKey::from_bytes(bytes))
++    }
++
++    /// The 32-byte seed of this signing key, for persistence. Secret material —
++    /// store encrypted (e.g. Android Keystore).
++    pub fn to_bytes(&self) -> [u8; 32] {
++        self.0.to_bytes()
++    }
++
+     pub fn sign(&self, msg: &[u8]) -> Ed25519Signature {
+         self.0.sign(msg).to_bytes().into()
+     }
+diff --git a/crates/generic-chat/src/delegate.rs b/crates/generic-chat/src/delegate.rs
+index a8ea88c..45408fa 100644
+--- a/crates/generic-chat/src/delegate.rs
++++ b/crates/generic-chat/src/delegate.rs
+@@ -24,6 +24,16 @@ impl DelegateSigner {
+         }
+     }
+ 
++    /// Rehydrate a delegate signer from a persisted signing key (persistent
++    /// per-device identity). Pair with [`Ed25519SigningKey::from_bytes`].
++    pub fn from_signing_key(signing_key: Ed25519SigningKey) -> Self {
++        let verifying_key = signing_key.verifying_key();
++        Self {
++            signing_key,
++            verifying_key,
++        }
++    }
++
+     pub fn public_key(&self) -> &Ed25519VerifyingKey {
+         &self.verifying_key
+     }
+diff --git a/crates/logos-chat/Cargo.toml b/crates/logos-chat/Cargo.toml
+index 63a8af6..30991c9 100644
+--- a/crates/logos-chat/Cargo.toml
++++ b/crates/logos-chat/Cargo.toml
+@@ -10,6 +10,7 @@ crate-type = ["rlib"]
+ # Workspace dependencies (sorted)
+ components = { workspace = true }
+ crossbeam-channel = { workspace = true }
++crypto = { workspace = true }
+ embedded-logos-delivery = { workspace = true }
+ libchat = { workspace = true }
+ logos-account = { workspace = true, features = ["dev"] }
+diff --git a/crates/logos-chat/src/lib.rs b/crates/logos-chat/src/lib.rs
+index b9381e7..bf46dcb 100644
+--- a/crates/logos-chat/src/lib.rs
++++ b/crates/logos-chat/src/lib.rs
+@@ -1,6 +1,9 @@
+ mod logos;
+ 
+-pub use logos::{LogosChatClient, LogosConfig, REGISTRY_ENDPOINT, open, open_with_transport};
++pub use logos::{
++    LogosChatClient, LogosConfig, REGISTRY_ENDPOINT, generate_identity, open, open_persistent,
++    open_with_transport,
++};
+ // Facade re-exports so callers need no direct dependency on the transport
+ // crate.
+ pub use embedded_logos_delivery::{
+diff --git a/crates/logos-chat/src/logos.rs b/crates/logos-chat/src/logos.rs
+index a5d87ca..f5c6915 100644
+--- a/crates/logos-chat/src/logos.rs
++++ b/crates/logos-chat/src/logos.rs
+@@ -16,6 +16,7 @@
+ 
+ use components::HttpRegistry;
+ use crossbeam_channel::Receiver;
++use crypto::Ed25519SigningKey;
+ use embedded_logos_delivery::{EmbeddedLogosDelivery, P2pConfig};
+ use libchat::{ChatStorage, StorageConfig};
+ use logos_account::TestLogosAccount;
+@@ -135,6 +136,56 @@ pub fn open_with_transport<T: Transport>(
+     builder.build()
+ }
+ 
++/// Generate a fresh persistent identity: `(account_seed, delegate_seed)`, two
++/// 32-byte Ed25519 seeds. Persist them (encrypted) and pass them to
++/// [`open_persistent`] on every launch to keep a **stable address across
++/// restarts** — the account address is `hex(verifying_key(account_seed))`, fixed
++/// by the seed. This is the persistent-identity path the ephemeral [`open`]
++/// (fresh account every call) does not provide.
++pub fn generate_identity() -> ([u8; 32], [u8; 32]) {
++    (
++        Ed25519SigningKey::generate().to_bytes(),
++        Ed25519SigningKey::generate().to_bytes(),
++    )
++}
++
++/// Open a Logos client with a **persisted identity**: `account_seed` and
++/// `delegate_seed` (from [`generate_identity`], stored between runs) rehydrate
++/// the account + delegate, so the client keeps the SAME address across restarts.
++///
++/// Mirrors [`open`] otherwise — starts the embedded delivery node, (idempotently)
++/// republishes the delegate to the registry, and opens encrypted storage — but
++/// replaces the throwaway `TestLogosAccount::new()` / `DelegateSigner::random()`
++/// with keys reconstructed from the supplied seeds. This is the load-or-create
++/// substrate the desktop module relies on; the caller owns seed storage
++/// (Android Keystore-encrypted on device).
++pub fn open_persistent(
++    config: LogosConfig,
++    account_seed: [u8; 32],
++    delegate_seed: [u8; 32],
++) -> Result<(LogosChatClient, Receiver<Event>), ClientError> {
++    let transport = EmbeddedLogosDelivery::start(config.p2p_config.clone())
++        .map_err(|e| ClientError::Transport(e.to_string()))?;
++    let account = TestLogosAccount::from_signing_key(Ed25519SigningKey::from_bytes(&account_seed));
++    let delegate = DelegateSigner::from_signing_key(Ed25519SigningKey::from_bytes(&delegate_seed));
++    let mut registry = HttpRegistry::new(config.registry_url);
++    account
++        .add_delegate_signer(&mut registry, delegate.public_key())
++        .map_err(|e| ClientError::BundlePublish(e.to_string()))?;
++    let mut builder = ChatClientBuilder::new(account.address())
++        .ident(delegate)
++        .transport(transport)
++        .registration(registry)
++        .storage_config(StorageConfig::Encrypted {
++            path: config.db_path,
++            key: config.db_key,
++        });
++    if let Some(group_v2) = config.group_v2_config {
++        builder = builder.group_v2_config(group_v2);
++    }
++    builder.build()
++}
++
+ /// The Logos client: a [`ChatClient`] wired to the Logos service stack — a
+ /// [`DelegateSigner`] identity acting for a fresh dev account, the HTTP
+ /// keypackage + account registry ([`HttpRegistry`], which is both the
+diff --git a/extensions/logos-delivery-rust/build.rs b/extensions/logos-delivery-rust/build.rs
+index e015061..85ee0cc 100644
+--- a/extensions/logos-delivery-rust/build.rs
++++ b/extensions/logos-delivery-rust/build.rs
+@@ -20,7 +20,10 @@ fn main() {
+     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+ 
+     match target_os.as_str() {
+-        "macos" | "linux" => {}
++        // android is treated like linux: only the relocatable path is supported
++        // (see below) — the absolute-stamp path needs patchelf on the host lib
++        // which we don't do for a cross-compiled ship-into-APK artifact.
++        "macos" | "linux" | "android" => {}
+         other => panic!("unsupported OS for logos-delivery transport: {other}"),
+     }
+ 

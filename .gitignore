@@ -1,0 +1,4 @@
+libchat-build/
+out/
+target/
+*.db

@@ -1,0 +1,18 @@
+[package]
+name = "liblogoschat-android"
+version = "0.1.0"
+edition = "2024"
+
+# Thin cdylib C-ABI wrapper over the `logos_chat` facade, for the Android app.
+# Exposes the 15-verb / event-callback contract the desktop chat_module mirrors,
+# plus a network-free `logoschat_gen_address` used by the M0' on-device smoke.
+[lib]
+name = "logoschat"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+logos-chat = { workspace = true }
+logos-account = { workspace = true }
+logos-generic-chat = { workspace = true }
+crossbeam-channel = { workspace = true }
+serde_json = "1.0"

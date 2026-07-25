@@ -16,6 +16,10 @@ LIB=${LIB:-/extra/tmp/libchat-mls-build/target-host/release/liblogoschat.so}
 # Host delivery node + RLN (x86_64) — the installed Basecamp module ships them.
 DELIVERY_DIR=${DELIVERY_DIR:-$HOME/.local/share/Logos/LogosBasecamp/modules/delivery_module}
 WORKDIR=${WORKDIR:-/tmp/logoschat-peer}
+# The account/keypackage directory. EMPTY here means "use the .so's baked-in
+# default" (peer.c passes NULL for an empty value) — do NOT pass an empty string
+# through to open_persistent, which treats "" as an invalid URL and fails with
+# 'device bundle publish failed: directory: http: builder error' (repo #1).
 REGISTRY=${REGISTRY:-}
 
 [ -f "$LIB" ] || { echo "missing host wrapper: $LIB (build it first — see header)"; exit 1; }

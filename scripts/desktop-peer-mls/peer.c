@@ -84,7 +84,7 @@ static void die(const char *m) {
 int main(int argc, char **argv) {
   const char *lib = argc > 1 ? argv[1] : "./liblogoschat.so";
   const char *workdir = argc > 2 ? argv[2] : "/tmp/logoschat-peer";
-  const char *registry = argc > 3 ? argv[3] : NULL; // NULL = baked-in default
+  const char *registry = (argc > 3 && argv[3][0]) ? argv[3] : NULL; // empty/absent -> NULL -> baked-in default
 
   void *h = dlopen(lib, RTLD_NOW | RTLD_GLOBAL);
   if (!h) {

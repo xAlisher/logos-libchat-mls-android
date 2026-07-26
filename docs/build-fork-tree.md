@@ -418,3 +418,154 @@ member). The same verb on a non-group / unknown convo id returned NULL with
 libchat abort still stands, so the error case uses an unknown id rather than a real
 1:1 — same NULL+error branch.) `cargo test --release --workspace`: all green, 0 failed.
 arm64 build: **17** `logoschat_*` exports.
+
+---
+
+## Node 11 — SDS reliable channels (delivery backfill/repair), logos-chat-android#211 (2026-07-26)
+
+**Goal.** Migrate the delivery layer from plain Waku pub/sub (`logosdelivery_send` +
+`logosdelivery_subscribe`, no backfill — a message published while the receiver has no
+peer is lost forever) to the SDS **reliable channels** the prebuilt
+`liblogosdelivery.so` already exports (`logosdelivery_channel_create/send/close`,
+backed by `reliable_channel.nim` + sds-0.3.0: causal history, `missingDeps`,
+sender-driven retransmission), so a receiver that was briefly offline backfills what
+it missed. Keep the public Delivery API stable (embedded-logos-delivery + liblogoschat
+unchanged). Branch `feat/sds-reliable-channels`.
+
+### STEP 1 — the channel inbound event JSON (from upstream source, verbatim)
+
+`logos-messaging/logos-delivery@master` `library/logos_delivery_api/node_api.nim`
+(the `ChannelMessageReceivedEvent` listener wired in `logosdelivery_start_node`):
+
+```json
+{"eventType":"channel_message_received","channelId":"<id>","senderId":"<sds id>","payload":"<base64>"}
+```
+
+- No `contentTopic` (the channel owns it), **no** `messageId` / `missingDeps` /
+  `repaired` flag. SDS-R repair is **transparent**: a repaired/backfilled message is
+  surfaced as an ordinary `channel_message_received` — there is no separate event.
+- Send-side events (`newJsonEvent`, flattened):
+  `{"eventType":"channel_message_sent","channelId","requestId"}` and
+  `{"eventType":"channel_message_error","channelId","requestId","error"}`.
+- Config: `channels` are enabled by the current flat config already — upstream
+  `logos_delivery_conf_json.nim`'s legacy `parseFlatConf` builds the full stack with
+  `channelsConf: Opt.some`. A structured `channelsOverrides` block can NOT be mixed
+  with the bare kernel fields (`tcpPort`, …) we send, so SDS defaults apply
+  (`reliable_channel_manager.nim`/`scalable_data_sync.nim`): 5 s ack timeout,
+  5 retransmissions (~25 s window), causal-history size 2.
+- Receive requires BOTH a plain Waku subscription AND `channel_create`: the channel's
+  ingress just filters the node's existing `MessageReceivedEvent` broker stream by
+  content-topic + the `meta` spec marker `RELIABLE-CHANNEL-API/1`
+  (`reliable_channel.nim:onMessageReceived`); `channel_create` does NOT subscribe Waku.
+
+### STEP 2 — implementation (public Delivery API unchanged)
+
+- `extensions/logos-delivery-rust/src/sys.rs` — added `logosdelivery_channel_create/
+  send/close` extern decls.
+- `wrapper.rs` — `LogosNodeCtx::{channel_create, channel_send, channel_close}` (same
+  heap-boxed one-shot callback pattern as `subscribe`).
+- `threaded.rs`:
+  - `subscribe(topic)` (channel mode) → `node.subscribe(topic)` **and**
+    `channel_create(channelId=topic, contentTopic=topic, senderId)`; `publish` →
+    `channel_send(topic, {payload,ephemeral:false})`; `unsubscribe` →
+    `channel_close` + `unsubscribe`. `channelId == content_topic` (trivial reverse map).
+  - `WakuEvent::into_received` now also decodes `channel_message_received`
+    (channelId → content_topic); a **mode-aware filter** drops the OTHER transport's
+    events (in channel mode `message_received` carries raw SDS wire bytes and must not
+    reach the app; in plain mode `channel_message_received` is dropped).
+  - `senderId` = a process-unique non-empty id (an empty id disables SDS repair
+    participation upstream).
+- All shipped in `patches/libchat-android-arm64.patch`. Proof harness:
+  `extensions/logos-delivery-rust/examples/channel_repair.rs` (+ `scripts/
+  channel-repair-proof.sh`, `scripts/conn_diag.c`).
+
+### STEP 3 — build ✅
+
+`scripts/build-android-arm64.sh` reverts the checkout, reapplies the regenerated
+patch, and rebuilds clean → `out/arm64-v8a/liblogoschat.so`, arm64 ELF, **17**
+`logoschat_*` exports, `liblogosdelivery.so` in DT_NEEDED. Host build of the crate +
+example also clean.
+
+### STEP 4 — headless proof + WALLS
+
+Two devices (Pixel + Samsung) and two host x86_64 processes on the real `logos.dev`
+fleet. Findings, in order:
+
+- **Connectivity is fine.** `conn_diag` (dlopen `liblogosdelivery.so` directly, query
+  `Metrics`) shows `libp2p_peers 3.0→4.0` within seconds. The `no subscribed peers
+  found` flood is only mix/rln filter noise. **Plain delivery works** phone↔phone and
+  host↔host (baseline receiver gets the message); earlier total failures were the
+  in-process dual-node case (nwaku has process-global state — one node per process)
+  plus too-short warmup, not a transport bug.
+
+- **WALL 1 — the shipped prebuilt lib predates the channel encryption fix.**
+  On the arm64 prebuilt (`xAlisher/logos-libdelivery-android` v0.1.0, built from
+  logos-delivery `7a3a064`, embedded date **2026-06-26**), `channel_send` returns a
+  requestId but the message never reaches the wire; the send-side event stream shows:
+  ```
+  message_error:        "encryption failed: RequestBroker(Encrypt): no provider registered for input signature"
+  channel_message_error:"one or more segments failed"
+  ```
+  `channel_send` does `Encrypt.request(...)` before publishing; with no provider the
+  segment is dropped silently. Upstream fixed this in **#4051 "fix(channels): default
+  channels to unencrypted so messages flow" (2dbf9a3, 2026-07-20)**, which calls
+  `setNoopEncryption()` in `ReliableChannelManager.start()`. `git compare` confirms
+  `7a3a064` is **14 commits behind** `2dbf9a3`. There is **no FFI to install an
+  encryption provider from the app**, so the prebuilt's `channel_*` exports are
+  non-functional. Fix = ship a liblogosdelivery built from ≥ #4051.
+
+- Obtained a **post-#4051 host x86_64 lib** from logos-delivery CI artifact
+  `liblogosdelivery` (2026-07-25, run 30176598972) — self-contained (no `librln`/
+  `libc++_shared` in DT_NEEDED), exports `channel_*`. (nix route to build one was
+  blocked: nix-daemon down, needs sudo; arm64 from-source needs nim ≥2.2 + Docker
+  `cross` for RLN — not available here.)
+
+- **WALL 2 — SDS parks the first / unidirectional message.** With the #4051 lib
+  `channel_send` succeeds (no encryption error) and the SDS-wrapped WakuMessage (meta
+  marker `RELIABLE-CHANNEL-API/1`, correct content-topic, payload "M0-live" visible in
+  the envelope) **is received** by the channel node (`message_received` fires) — but
+  the nim SDS ingest emits **no** `channel_message_received` and no error. Cause
+  (`scalable_data_sync.nim:handleIncoming`): the message's `unwrapped.missingDeps.len
+  > 0` (it references periodic SDS-sync IDs the receiver never saw), so it is **parked
+  in `pendingContent`** pending repair. A single unidirectional message therefore
+  never surfaces.
+
+- **Channel delivery WORKS with bidirectional / streaming traffic (proven).**
+  Two channel peers, receiver also sends once to bootstrap the SDS sync, sender then
+  streams: receiver got `M1,M2,M3`, sender got the receiver's `R-hello`. So the SDS
+  sync establishes once both directions exchange, and messages flow both ways.
+
+- **Late-joiner catch-up WORKS; total-offline-gap backfill did NOT (this fleet).**
+  Repair scenario (`scripts`/`host-repair2.sh`): A streams a channel; B is online for
+  the baseline (`GOT PRE-1..3`), is KILLED (fully offline), A sends `GAP-1/GAP-2` while
+  nobody listens, then a **fresh** node B2 returns, bootstraps bidirectionally, and A
+  keeps streaming. Result: **B2 caught up the entire ongoing stream `POST-1..14`**
+  after re-establishing sync — i.e. a returning node re-syncs and receives live
+  channel traffic (a real reliability gain over plain, where a returning node loses
+  the mesh-formation window). BUT the two messages published **entirely during the
+  offline gap** (`GAP-1/GAP-2`, never acknowledged by any peer) were **not** backfilled
+  to the fully-restarted node. The `logos.dev` fleet peers advertise
+  `agent_version=logos-delivery-v0.38.1` (2026-05) — well before the reliable-channel/
+  SDS-R work — so SDS-R store/repair of never-acknowledged messages to a state-less
+  returning node does not complete against the current public fleet.
+
+### Root cause (one sentence)
+
+The migration is a small, stable-API change (add `channel_*` to the FFI + route
+`subscribe`→`subscribe`+`channel_create` and `publish`→`channel_send`, decode the
+`channel_message_received` event), but end-to-end channel traffic needs a
+liblogosdelivery built from ≥ #4051 (the shipped prebuilt drops every send for lack
+of an encryption provider) **and** an SDS-aware fleet; with a #4051 host lib channel
+delivery + late-joiner catch-up are proven, while backfill of messages sent during a
+total offline gap to a state-less returning node does not yet complete against the
+current v0.38.1 fleet.
+
+### Shipping decision — channels gated OFF by default
+
+Because neither available native binary delivers channel traffic reliably end-to-end
+(prebuilt: silent send failure; #4051 host lib: no gap-backfill against v0.38.1),
+defaulting to channels would silently drop chat traffic. The full channel path is
+therefore implemented but **gated behind `LOGOS_DELIVERY_CHANNELS=1`**; plain
+relay/filter stays the default. Flip the default in `threaded.rs` once (a) the app
+ships a liblogosdelivery ≥ #4051 and (b) gap-backfill is confirmed against an
+SDS-capable fleet. Escape hatch documented inline.

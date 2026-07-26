@@ -1,3 +1,1067 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 280e23c..d93fff5 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -65,31 +65,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5e1e915a830ea2ee123c9d3886bfec3302a7ddcd73a973ab165ed45aca2e42c3"
+ dependencies = [
+  "alloy-consensus",
+- "alloy-contract",
+  "alloy-core",
+  "alloy-eips",
+- "alloy-genesis",
+  "alloy-network",
+- "alloy-provider",
+- "alloy-rpc-client",
+  "alloy-rpc-types",
+- "alloy-serde",
+  "alloy-signer",
+  "alloy-signer-local",
+- "alloy-transport",
+- "alloy-transport-http",
+- "alloy-trie",
+-]
+-
+-[[package]]
+-name = "alloy-chains"
+-version = "0.2.34"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "84e0378e959aa6a885897522080a990e80eb317f1e9a222a604492ea50e13096"
+-dependencies = [
+- "alloy-primitives",
+- "num_enum",
+- "strum 0.27.2",
+ ]
+ 
+ [[package]]
+@@ -133,56 +114,13 @@ dependencies = [
+  "serde",
+ ]
+ 
+-[[package]]
+-name = "alloy-contract"
+-version = "2.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3ae8b60d71b92824e095b4003ff01fd2bc923017b7568997c5f459240e83499c"
+-dependencies = [
+- "alloy-consensus",
+- "alloy-dyn-abi",
+- "alloy-json-abi",
+- "alloy-network",
+- "alloy-network-primitives",
+- "alloy-primitives",
+- "alloy-provider",
+- "alloy-rpc-types-eth",
+- "alloy-sol-types",
+- "alloy-transport",
+- "futures",
+- "futures-util",
+- "serde_json",
+- "thiserror",
+- "tracing",
+-]
+-
+ [[package]]
+ name = "alloy-core"
+ version = "1.6.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "62ddde5968de6044d67af107ad835bc0069a7ca245870b94c5958a7d8712b184"
+ dependencies = [
+- "alloy-dyn-abi",
+- "alloy-json-abi",
+- "alloy-primitives",
+- "alloy-rlp",
+- "alloy-sol-types",
+-]
+-
+-[[package]]
+-name = "alloy-dyn-abi"
+-version = "1.6.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a475bb02d9cef2dbb99065c1664ab3fe1f9352e21d6d5ed3f02cdbfc06ed1abc"
+-dependencies = [
+- "alloy-json-abi",
+  "alloy-primitives",
+- "alloy-sol-type-parser",
+- "alloy-sol-types",
+- "itoa",
+- "serde",
+- "serde_json",
+- "winnow",
+ ]
+ 
+ [[package]]
+@@ -261,21 +199,6 @@ dependencies = [
+  "sha2 0.10.9",
+ ]
+ 
+-[[package]]
+-name = "alloy-genesis"
+-version = "2.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ab0e0fe9e6d1120ad7bb9254c3fc2b9bc80a8df42a033fb626be6559c13d5153"
+-dependencies = [
+- "alloy-eips",
+- "alloy-primitives",
+- "alloy-serde",
+- "alloy-trie",
+- "borsh",
+- "serde",
+- "serde_with",
+-]
+-
+ [[package]]
+ name = "alloy-json-abi"
+ version = "1.6.0"
+@@ -370,45 +293,6 @@ dependencies = [
+  "sha3",
+ ]
+ 
+-[[package]]
+-name = "alloy-provider"
+-version = "2.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8955ab30418343de57b356de2ea60200f9fb8016a7ea3bc7f5c6176f01a8b1cf"
+-dependencies = [
+- "alloy-chains",
+- "alloy-consensus",
+- "alloy-eips",
+- "alloy-json-rpc",
+- "alloy-network",
+- "alloy-network-primitives",
+- "alloy-primitives",
+- "alloy-rpc-client",
+- "alloy-rpc-types-eth",
+- "alloy-signer",
+- "alloy-sol-types",
+- "alloy-transport",
+- "alloy-transport-http",
+- "async-stream",
+- "async-trait",
+- "auto_impl",
+- "dashmap",
+- "either",
+- "futures",
+- "futures-utils-wasm",
+- "lru 0.16.4",
+- "parking_lot",
+- "pin-project",
+- "reqwest 0.13.4",
+- "serde",
+- "serde_json",
+- "thiserror",
+- "tokio",
+- "tracing",
+- "url",
+- "wasmtimer",
+-]
+-
+ [[package]]
+ name = "alloy-rlp"
+ version = "0.3.15"
+@@ -431,29 +315,6 @@ dependencies = [
+  "syn 2.0.117",
+ ]
+ 
+-[[package]]
+-name = "alloy-rpc-client"
+-version = "2.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "24f461f091dc8f657e73b5dea18fd63d5c7049720cd252f1eade4a7ebed6a7e1"
+-dependencies = [
+- "alloy-json-rpc",
+- "alloy-primitives",
+- "alloy-transport",
+- "alloy-transport-http",
+- "futures",
+- "pin-project",
+- "reqwest 0.13.4",
+- "serde",
+- "serde_json",
+- "tokio",
+- "tokio-stream",
+- "tower",
+- "tracing",
+- "url",
+- "wasmtimer",
+-]
+-
+ [[package]]
+ name = "alloy-rpc-types"
+ version = "2.0.5"
+@@ -564,7 +425,6 @@ version = "1.6.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "63ec265e5d65d725175f6ca7711c970824c90ef9c0d1f1973711d4150ee612dd"
+ dependencies = [
+- "alloy-json-abi",
+  "alloy-sol-macro-input",
+  "const-hex",
+  "heck",
+@@ -583,14 +443,12 @@ version = "1.6.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "89bf01077f18650876cfa682eb1f949967b5cde03f1a51c955c469d2c9b4aa67"
+ dependencies = [
+- "alloy-json-abi",
+  "const-hex",
+  "dunce",
+  "heck",
+  "macro-string",
+  "proc-macro2",
+  "quote",
+- "serde_json",
+  "syn 2.0.117",
+  "syn-solidity",
+ ]
+@@ -617,45 +475,6 @@ dependencies = [
+  "serde",
+ ]
+ 
+-[[package]]
+-name = "alloy-transport"
+-version = "2.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "86052fdcec72d37ca4aa4b66254601e7453c45a6e1c70aa4561033d002fb80cc"
+-dependencies = [
+- "alloy-json-rpc",
+- "auto_impl",
+- "base64",
+- "derive_more 2.1.1",
+- "futures",
+- "futures-utils-wasm",
+- "parking_lot",
+- "serde",
+- "serde_json",
+- "thiserror",
+- "tokio",
+- "tower",
+- "tracing",
+- "url",
+- "wasmtimer",
+-]
+-
+-[[package]]
+-name = "alloy-transport-http"
+-version = "2.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b273587487921274f4f5d0ef2c7ef36944dcbb75a4e2318e69eae822bd263f91"
+-dependencies = [
+- "alloy-json-rpc",
+- "alloy-transport",
+- "itertools 0.14.0",
+- "reqwest 0.13.4",
+- "serde_json",
+- "tower",
+- "tracing",
+- "url",
+-]
+-
+ [[package]]
+ name = "alloy-trie"
+ version = "0.9.5"
+@@ -973,28 +792,6 @@ version = "0.7.6"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+ 
+-[[package]]
+-name = "async-stream"
+-version = "0.3.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
+-dependencies = [
+- "async-stream-impl",
+- "futures-core",
+- "pin-project-lite",
+-]
+-
+-[[package]]
+-name = "async-stream-impl"
+-version = "0.3.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.117",
+-]
+-
+ [[package]]
+ name = "async-trait"
+ version = "0.1.89"
+@@ -1029,28 +826,6 @@ version = "1.5.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+ 
+-[[package]]
+-name = "aws-lc-rs"
+-version = "1.17.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5ec2f1fc3ec205783a5da9a7e6c1509cc69dedf09a1949e412c1e18469326d00"
+-dependencies = [
+- "aws-lc-sys",
+- "zeroize",
+-]
+-
+-[[package]]
+-name = "aws-lc-sys"
+-version = "0.41.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1a2f9779ce85b93ab6170dd940ad0169b5766ff848247aff13bb788b832fe3f4"
+-dependencies = [
+- "cc",
+- "cmake",
+- "dunce",
+- "fs_extra",
+-]
+-
+ [[package]]
+ name = "base16ct"
+ version = "0.2.0"
+@@ -1266,8 +1041,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "43c5703da9466b66a946814e1adf53ea2c90f10063b86290cc9eb67ce3478a20"
+ dependencies = [
+  "find-msvc-tools",
+- "jobserver",
+- "libc",
+  "shlex",
+ ]
+ 
+@@ -1419,31 +1192,12 @@ dependencies = [
+  "error-code",
+ ]
+ 
+-[[package]]
+-name = "cmake"
+-version = "0.1.58"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
+-dependencies = [
+- "cc",
+-]
+-
+ [[package]]
+ name = "colorchoice"
+ version = "1.0.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+ 
+-[[package]]
+-name = "combine"
+-version = "4.6.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
+-dependencies = [
+- "bytes",
+- "memchr",
+-]
+-
+ [[package]]
+ name = "compact_str"
+ version = "0.8.1"
+@@ -1468,7 +1222,7 @@ dependencies = [
+  "hex",
+  "libchat",
+  "logos-account",
+- "reqwest 0.12.28",
++ "reqwest",
+  "serde",
+  "serde_json",
+  "storage",
+@@ -1530,16 +1284,6 @@ dependencies = [
+  "unicode-segmentation",
+ ]
+ 
+-[[package]]
+-name = "core-foundation"
+-version = "0.10.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b2a6cd9ae233e7f62ba4e9353e81a88df7fc8a5987b8d445b4d90c879bd156f6"
+-dependencies = [
+- "core-foundation-sys",
+- "libc",
+-]
+-
+ [[package]]
+ name = "core-foundation-sys"
+ version = "0.8.7"
+@@ -1800,20 +1544,6 @@ dependencies = [
+  "syn 2.0.117",
+ ]
+ 
+-[[package]]
+-name = "dashmap"
+-version = "6.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
+-dependencies = [
+- "cfg-if",
+- "crossbeam-utils",
+- "hashbrown 0.14.5",
+- "lock_api",
+- "once_cell",
+- "parking_lot_core",
+-]
+-
+ [[package]]
+ name = "de-mls"
+ version = "4.0.0"
+@@ -2275,33 +2005,12 @@ dependencies = [
+  "percent-encoding",
+ ]
+ 
+-[[package]]
+-name = "fs_extra"
+-version = "1.3.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
+-
+ [[package]]
+ name = "funty"
+ version = "2.0.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
+ 
+-[[package]]
+-name = "futures"
+-version = "0.3.32"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
+-dependencies = [
+- "futures-channel",
+- "futures-core",
+- "futures-executor",
+- "futures-io",
+- "futures-sink",
+- "futures-task",
+- "futures-util",
+-]
+-
+ [[package]]
+ name = "futures-channel"
+ version = "0.3.32"
+@@ -2318,17 +2027,6 @@ version = "0.3.32"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
+ 
+-[[package]]
+-name = "futures-executor"
+-version = "0.3.32"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "baf29c38818342a3b26b5b923639e7b1f4a61fc5e76102d4b1981c6dc7a7579d"
+-dependencies = [
+- "futures-core",
+- "futures-task",
+- "futures-util",
+-]
+-
+ [[package]]
+ name = "futures-io"
+ version = "0.3.32"
+@@ -2370,7 +2068,6 @@ version = "0.3.32"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
+ dependencies = [
+- "futures-channel",
+  "futures-core",
+  "futures-io",
+  "futures-macro",
+@@ -2503,12 +2200,6 @@ version = "0.12.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+ 
+-[[package]]
+-name = "hashbrown"
+-version = "0.14.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+-
+ [[package]]
+ name = "hashbrown"
+ version = "0.15.5"
+@@ -2520,17 +2211,6 @@ dependencies = [
+  "foldhash 0.1.5",
+ ]
+ 
+-[[package]]
+-name = "hashbrown"
+-version = "0.16.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+-dependencies = [
+- "allocator-api2",
+- "equivalent",
+- "foldhash 0.2.0",
+-]
+-
+ [[package]]
+ name = "hashbrown"
+ version = "0.17.0"
+@@ -3113,65 +2793,6 @@ version = "1.0.18"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+ 
+-[[package]]
+-name = "jni"
+-version = "0.22.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
+-dependencies = [
+- "cfg-if",
+- "combine",
+- "jni-macros",
+- "jni-sys",
+- "log",
+- "simd_cesu8",
+- "thiserror",
+- "walkdir",
+- "windows-link",
+-]
+-
+-[[package]]
+-name = "jni-macros"
+-version = "0.22.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "rustc_version 0.4.1",
+- "simd_cesu8",
+- "syn 2.0.117",
+-]
+-
+-[[package]]
+-name = "jni-sys"
+-version = "0.4.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
+-dependencies = [
+- "jni-sys-macros",
+-]
+-
+-[[package]]
+-name = "jni-sys-macros"
+-version = "0.4.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
+-dependencies = [
+- "quote",
+- "syn 2.0.117",
+-]
+-
+-[[package]]
+-name = "jobserver"
+-version = "0.1.34"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
+-dependencies = [
+- "getrandom 0.3.4",
+- "libc",
+-]
+-
+ [[package]]
+ name = "js-sys"
+ version = "0.3.95"
+@@ -3544,6 +3165,17 @@ dependencies = [
+  "rand 0.9.4",
+ ]
+ 
++[[package]]
++name = "liblogoschat-android"
++version = "0.1.0"
++dependencies = [
++ "crossbeam-channel",
++ "logos-account",
++ "logos-chat",
++ "logos-generic-chat",
++ "serde_json",
++]
++
+ [[package]]
+ name = "libm"
+ version = "0.2.16"
+@@ -3617,6 +3249,7 @@ version = "0.1.0"
+ dependencies = [
+  "components",
+  "crossbeam-channel",
++ "crypto",
+  "embedded-logos-delivery",
+  "libchat",
+  "logos-account",
+@@ -3665,15 +3298,6 @@ dependencies = [
+  "hashbrown 0.15.5",
+ ]
+ 
+-[[package]]
+-name = "lru"
+-version = "0.16.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7f66e8d5d03f609abc3a39e6f08e4164ebf1447a732906d39eb9b99b7919ef39"
+-dependencies = [
+- "hashbrown 0.16.1",
+-]
+-
+ [[package]]
+ name = "lru-slab"
+ version = "0.1.2"
+@@ -3798,27 +3422,6 @@ dependencies = [
+  "libc",
+ ]
+ 
+-[[package]]
+-name = "num_enum"
+-version = "0.7.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5d0bca838442ec211fa11de3a8b0e0e8f3a4522575b5c4c06ed722e005036f26"
+-dependencies = [
+- "num_enum_derive",
+- "rustversion",
+-]
+-
+-[[package]]
+-name = "num_enum_derive"
+-version = "0.7.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.117",
+-]
+-
+ [[package]]
+ name = "nybbles"
+ version = "0.4.8"
+@@ -4074,12 +3677,6 @@ dependencies = [
+  "tls_codec",
+ ]
+ 
+-[[package]]
+-name = "openssl-probe"
+-version = "0.2.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+-
+ [[package]]
+ name = "openssl-src"
+ version = "300.6.0+3.6.2"
+@@ -4223,38 +3820,12 @@ dependencies = [
+  "indexmap 2.14.0",
+ ]
+ 
+-[[package]]
+-name = "pin-project"
+-version = "1.1.13"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2466b2336ed02bcdca6b294417127b90ec92038d1d5c4fbeac971a922e0e0924"
+-dependencies = [
+- "pin-project-internal",
+-]
+-
+-[[package]]
+-name = "pin-project-internal"
+-version = "1.1.13"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c96395f0a926bc13b1c17622aaddda1ecb55d49c8f1bf9777e4d877800a43f8b"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.117",
+-]
+-
+ [[package]]
+ name = "pin-project-lite"
+ version = "0.2.17"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+ 
+-[[package]]
+-name = "pin-utils"
+-version = "0.1.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+-
+ [[package]]
+ name = "pkcs8"
+ version = "0.10.2"
+@@ -4515,7 +4086,6 @@ version = "0.11.14"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+ dependencies = [
+- "aws-lc-rs",
+  "bytes",
+  "getrandom 0.3.4",
+  "lru-slab",
+@@ -4691,9 +4261,9 @@ dependencies = [
+  "indoc",
+  "instability",
+  "itertools 0.13.0",
+- "lru 0.12.5",
++ "lru",
+  "paste",
+- "strum 0.26.3",
++ "strum",
+  "unicode-segmentation",
+  "unicode-truncate",
+  "unicode-width 0.2.0",
+@@ -4823,43 +4393,6 @@ dependencies = [
+  "webpki-roots",
+ ]
+ 
+-[[package]]
+-name = "reqwest"
+-version = "0.13.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
+-dependencies = [
+- "base64",
+- "bytes",
+- "futures-core",
+- "http",
+- "http-body",
+- "http-body-util",
+- "hyper",
+- "hyper-rustls",
+- "hyper-util",
+- "js-sys",
+- "log",
+- "percent-encoding",
+- "pin-project-lite",
+- "quinn",
+- "rustls",
+- "rustls-pki-types",
+- "rustls-platform-verifier",
+- "serde",
+- "serde_json",
+- "sync_wrapper",
+- "tokio",
+- "tokio-rustls",
+- "tower",
+- "tower-http",
+- "tower-service",
+- "url",
+- "wasm-bindgen",
+- "wasm-bindgen-futures",
+- "web-sys",
+-]
+-
+ [[package]]
+ name = "rfc6979"
+ version = "0.4.0"
+@@ -5045,7 +4578,6 @@ version = "0.23.40"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+ dependencies = [
+- "aws-lc-rs",
+  "once_cell",
+  "ring",
+  "rustls-pki-types",
+@@ -5054,18 +4586,6 @@ dependencies = [
+  "zeroize",
+ ]
+ 
+-[[package]]
+-name = "rustls-native-certs"
+-version = "0.8.4"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
+-dependencies = [
+- "openssl-probe",
+- "rustls-pki-types",
+- "schannel",
+- "security-framework",
+-]
+-
+ [[package]]
+ name = "rustls-pki-types"
+ version = "1.14.1"
+@@ -5076,40 +4596,12 @@ dependencies = [
+  "zeroize",
+ ]
+ 
+-[[package]]
+-name = "rustls-platform-verifier"
+-version = "0.7.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "26d1e2536ce4f35f4846aa13bff16bd0ff40157cdb14cc056c7b14ba41233ba0"
+-dependencies = [
+- "core-foundation",
+- "core-foundation-sys",
+- "jni",
+- "log",
+- "once_cell",
+- "rustls",
+- "rustls-native-certs",
+- "rustls-platform-verifier-android",
+- "rustls-webpki",
+- "security-framework",
+- "security-framework-sys",
+- "webpki-root-certs",
+- "windows-sys 0.61.2",
+-]
+-
+-[[package]]
+-name = "rustls-platform-verifier-android"
+-version = "0.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
+-
+ [[package]]
+ name = "rustls-webpki"
+ version = "0.103.13"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+ dependencies = [
+- "aws-lc-rs",
+  "ring",
+  "rustls-pki-types",
+  "untrusted",
+@@ -5139,24 +4631,6 @@ version = "1.0.23"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+ 
+-[[package]]
+-name = "same-file"
+-version = "1.0.6"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+-dependencies = [
+- "winapi-util",
+-]
+-
+-[[package]]
+-name = "schannel"
+-version = "0.1.29"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
+-dependencies = [
+- "windows-sys 0.61.2",
+-]
+-
+ [[package]]
+ name = "schemars"
+ version = "0.9.0"
+@@ -5243,29 +4717,6 @@ dependencies = [
+  "cc",
+ ]
+ 
+-[[package]]
+-name = "security-framework"
+-version = "3.7.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
+-dependencies = [
+- "bitflags",
+- "core-foundation",
+- "core-foundation-sys",
+- "libc",
+- "security-framework-sys",
+-]
+-
+-[[package]]
+-name = "security-framework-sys"
+-version = "2.17.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
+-dependencies = [
+- "core-foundation-sys",
+- "libc",
+-]
+-
+ [[package]]
+ name = "semver"
+ version = "0.11.0"
+@@ -5508,22 +4959,6 @@ version = "0.3.9"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
+ 
+-[[package]]
+-name = "simd_cesu8"
+-version = "1.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "94f90157bb87cddf702797c5dadfa0be7d266cdf49e22da2fcaa32eff75b2c33"
+-dependencies = [
+- "rustc_version 0.4.1",
+- "simdutf8",
+-]
+-
+-[[package]]
+-name = "simdutf8"
+-version = "0.1.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+-
+ [[package]]
+ name = "slab"
+ version = "0.4.12"
+@@ -5591,16 +5026,7 @@ version = "0.26.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+ dependencies = [
+- "strum_macros 0.26.4",
+-]
+-
+-[[package]]
+-name = "strum"
+-version = "0.27.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+-dependencies = [
+- "strum_macros 0.27.2",
++ "strum_macros",
+ ]
+ 
+ [[package]]
+@@ -5616,18 +5042,6 @@ dependencies = [
+  "syn 2.0.117",
+ ]
+ 
+-[[package]]
+-name = "strum_macros"
+-version = "0.27.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+-dependencies = [
+- "heck",
+- "proc-macro2",
+- "quote",
+- "syn 2.0.117",
+-]
+-
+ [[package]]
+ name = "subtle"
+ version = "2.6.1"
+@@ -5848,21 +5262,9 @@ dependencies = [
+  "mio",
+  "pin-project-lite",
+  "socket2",
+- "tokio-macros",
+  "windows-sys 0.61.2",
+ ]
+ 
+-[[package]]
+-name = "tokio-macros"
+-version = "2.7.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
+-dependencies = [
+- "proc-macro2",
+- "quote",
+- "syn 2.0.117",
+-]
+-
+ [[package]]
+ name = "tokio-rustls"
+ version = "0.26.4"
+@@ -5873,31 +5275,6 @@ dependencies = [
+  "tokio",
+ ]
+ 
+-[[package]]
+-name = "tokio-stream"
+-version = "0.1.18"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
+-dependencies = [
+- "futures-core",
+- "pin-project-lite",
+- "tokio",
+- "tokio-util",
+-]
+-
+-[[package]]
+-name = "tokio-util"
+-version = "0.7.18"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
+-dependencies = [
+- "bytes",
+- "futures-core",
+- "futures-sink",
+- "pin-project-lite",
+- "tokio",
+-]
+-
+ [[package]]
+ name = "toml_datetime"
+ version = "1.1.1+spec-1.1.0"
+@@ -6137,7 +5514,6 @@ dependencies = [
+  "idna",
+  "percent-encoding",
+  "serde",
+- "serde_derive",
+ ]
+ 
+ [[package]]
+@@ -6190,16 +5566,6 @@ dependencies = [
+  "libc",
+ ]
+ 
+-[[package]]
+-name = "walkdir"
+-version = "2.5.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
+-dependencies = [
+- "same-file",
+- "winapi-util",
+-]
+-
+ [[package]]
+ name = "want"
+ version = "0.3.1"
+@@ -6322,20 +5688,6 @@ dependencies = [
+  "semver 1.0.28",
+ ]
+ 
+-[[package]]
+-name = "wasmtimer"
+-version = "0.4.3"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1c598d6b99ea013e35844697fc4670d08339d5cda15588f193c6beedd12f644b"
+-dependencies = [
+- "futures",
+- "js-sys",
+- "parking_lot",
+- "pin-utils",
+- "slab",
+- "wasm-bindgen",
+-]
+-
+ [[package]]
+ name = "web-sys"
+ version = "0.3.95"
+@@ -6356,15 +5708,6 @@ dependencies = [
+  "wasm-bindgen",
+ ]
+ 
+-[[package]]
+-name = "webpki-root-certs"
+-version = "1.0.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+-dependencies = [
+- "rustls-pki-types",
+-]
+-
+ [[package]]
+ name = "webpki-roots"
+ version = "1.0.7"
+@@ -6396,15 +5739,6 @@ version = "0.4.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
+ 
+-[[package]]
+-name = "winapi-util"
+-version = "0.1.11"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+-dependencies = [
+- "windows-sys 0.61.2",
+-]
+-
+ [[package]]
+ name = "winapi-x86_64-pc-windows-gnu"
+ version = "0.4.0"
 diff --git a/Cargo.toml b/Cargo.toml
 index 1efb279..bce2243 100644
 --- a/Cargo.toml
@@ -962,3 +2026,620 @@ index e015061..85ee0cc 100644
          other => panic!("unsupported OS for logos-delivery transport: {other}"),
      }
  
+diff --git a/extensions/logos-delivery-rust/examples/channel_repair.rs b/extensions/logos-delivery-rust/examples/channel_repair.rs
+new file mode 100644
+index 0000000..b02bbd0
+--- /dev/null
++++ b/extensions/logos-delivery-rust/examples/channel_repair.rs
+@@ -0,0 +1,115 @@
++//! Role-based delivery peer for the SDS reliable-channel repair proof
++//! (logos-chat-android#211). ONE node per process (nwaku keeps process-global
++//! state, so multiple nodes must live in separate processes).
++//!
++//! Usage:
++//!   channel_repair recv <topic> <port>
++//!       Subscribe and print `## GOT <utf8>` for every message, forever.
++//!   channel_repair send <topic> <port> <delay_m0_s> <delay_m1_s>
++//!       Subscribe, then at t=<delay_m0> publish "M0-live" and at t=<delay_m1>
++//!       publish "M1-while-offline"; then stay alive so SDS keeps retransmitting
++//!       the unacked message (that retransmission is the repair mechanism).
++//!
++//! Transport is chosen by the migrated delivery layer: SDS reliable channels by
++//! default, plain relay/filter when LOGOS_DELIVERY_PLAIN=1 (for the A/B contrast).
++//!
++//! Driven by scripts/channel-repair-proof.sh on-device. Requires LD_LIBRARY_PATH
++//! at liblogosdelivery.so + librln.so.
++
++use std::io::Write;
++use std::time::Duration;
++
++use logos_delivery::{P2pConfig, ThreadedDeliveryWrapper, WakuEvent};
++
++fn say(s: &str) {
++    println!("{s}");
++    let _ = std::io::stdout().flush();
++}
++
++fn main() {
++    let args: Vec<String> = std::env::args().collect();
++    let role = args.get(1).cloned().unwrap_or_default();
++    let topic = args.get(2).cloned().expect("usage: <role> <topic> <port> ...");
++    let port: u16 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
++
++    // Channels are opt-in (LOGOS_DELIVERY_CHANNELS=1); plain relay/filter is the
++    // default — mirrors the gating in ThreadedDeliveryWrapper.
++    let channels = matches!(
++        std::env::var("LOGOS_DELIVERY_CHANNELS").as_deref(),
++        Ok("1") | Ok("true")
++    );
++    let plain = !channels;
++
++    let log_level = std::env::var("LOGLEVEL").unwrap_or_else(|_| "ERROR".into());
++    let want = topic.clone();
++    let mut node = ThreadedDeliveryWrapper::<String>::start(
++        P2pConfig {
++            port,
++            log_level,
++            ..Default::default()
++        },
++        move |ev: WakuEvent| {
++            let m = ev.into_received()?;
++            if m.content_topic() != want {
++                return None;
++            }
++            String::from_utf8(m.into_payload()?).ok()
++        },
++    )
++    .expect("node start");
++    node.subscribe(&topic).expect("subscribe");
++    let rx = node.inbound_queue();
++
++    say(&format!(
++        "## READY role={role} port={port} transport={}",
++        if plain { "plain" } else { "sds-channels" }
++    ));
++
++    match role.as_str() {
++        "recv" => loop {
++            if let Ok(m) = rx.recv_timeout(Duration::from_millis(500)) {
++                say(&format!("## GOT {m}"));
++            }
++        },
++        // Interactive: drain inbound in a thread, publish on `pub <text>` from
++        // stdin. Lets an external orchestrator control exact publish timing.
++        "peer" => {
++            std::thread::spawn(move || loop {
++                if let Ok(m) = rx.recv_timeout(Duration::from_millis(500)) {
++                    say(&format!("## GOT {m}"));
++                }
++            });
++            let stdin = std::io::stdin();
++            let mut line = String::new();
++            loop {
++                line.clear();
++                if std::io::BufRead::read_line(&mut stdin.lock(), &mut line).unwrap_or(0) == 0 {
++                    break;
++                }
++                let cmd = line.trim();
++                if let Some(text) = cmd.strip_prefix("pub ") {
++                    match node.publish(&topic, text.as_bytes()) {
++                        Ok(()) => say(&format!("## PUBLISHED {text}")),
++                        Err(e) => say(&format!("## PUBERR {e}")),
++                    }
++                } else if cmd == "quit" {
++                    break;
++                }
++            }
++        }
++        "send" => {
++            let d0: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(20);
++            let d1: u64 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(45);
++            std::thread::sleep(Duration::from_secs(d0));
++            node.publish(&topic, b"M0-live").expect("publish M0");
++            say("## PUBLISHED M0-live");
++            std::thread::sleep(Duration::from_secs(d1.saturating_sub(d0)));
++            node.publish(&topic, b"M1-while-offline").expect("publish M1");
++            say("## PUBLISHED M1-while-offline");
++            // Stay alive so SDS keeps retransmitting the unacked M1.
++            std::thread::sleep(Duration::from_secs(120));
++        }
++        _ => eprintln!("usage: channel_repair <send|recv> <topic> <port> [d0 d1]"),
++    }
++    std::process::exit(0);
++}
+diff --git a/extensions/logos-delivery-rust/src/sys.rs b/extensions/logos-delivery-rust/src/sys.rs
+index 2036116..022e90b 100644
+--- a/extensions/logos-delivery-rust/src/sys.rs
++++ b/extensions/logos-delivery-rust/src/sys.rs
+@@ -69,6 +69,44 @@ unsafe extern "C" {
+         user_data: *const c_void,
+         node_info_id: *const c_char,
+     ) -> c_int;
++
++    // ── SDS reliable channels ──────────────────────────────────────────────
++    //
++    // Backed by `reliable_channel.nim` + sds-0.3.0 (causal history, missingDeps,
++    // sender-driven retransmission = automatic missed-message repair). Creating a
++    // channel subscribes its `content_topic` and routes received/repaired messages
++    // to a `channel_message_received` event.
++
++    /// Create (or restore) a reliable channel. `channel_id` is a free-form string
++    /// key; `content_topic` is the Waku content topic the channel rides on;
++    /// `sender_id` identifies this participant for SDS (must be NON-EMPTY, or
++    /// repair participation is disabled). Returns the channel id on success.
++    pub fn logosdelivery_channel_create(
++        ctx: *mut c_void,
++        cb: FFICallBack,
++        user_data: *const c_void,
++        channel_id: *const c_char,
++        content_topic: *const c_char,
++        sender_id: *const c_char,
++    ) -> c_int;
++
++    /// Send on a reliable channel. `message_json`: `{"payload":"<base64>","ephemeral":false}`
++    /// (no contentTopic — the channel already owns it). Returns the request id.
++    pub fn logosdelivery_channel_send(
++        ctx: *mut c_void,
++        cb: FFICallBack,
++        user_data: *const c_void,
++        channel_id: *const c_char,
++        message_json: *const c_char,
++    ) -> c_int;
++
++    /// Close a reliable channel. Persisted SDS state survives (re-create restores).
++    pub fn logosdelivery_channel_close(
++        ctx: *mut c_void,
++        cb: FFICallBack,
++        user_data: *const c_void,
++        channel_id: *const c_char,
++    ) -> c_int;
+ }
+ 
+ // ── Trampoline ───────────────────────────────────────────────────────────────
+diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
+index 2533039..e4d6c5a 100644
+--- a/extensions/logos-delivery-rust/src/threaded.rs
++++ b/extensions/logos-delivery-rust/src/threaded.rs
+@@ -27,10 +27,15 @@ pub enum DeliveryError {
+ 
+ // ── Internals ────────────────────────────────────────────────────────────────
+ 
+-/// A node operation to run on the serialized node thread.
++/// A node operation to run on the serialized node thread. `Publish` carries the
++/// content topic + raw payload (not a pre-built message JSON) so the node thread
++/// can build the right wire form for whichever delivery path is active.
+ #[derive(Debug)]
+ enum NodeOp {
+-    Publish(String),     // message_json
++    Publish {
++        content_topic: String,
++        payload: Vec<u8>,
++    },
+     Subscribe(String),   // content_topic
+     Unsubscribe(String), // content_topic
+ }
+@@ -71,7 +76,7 @@ impl Default for P2pConfig {
+ 
+ // ── Wire types ──────────────────────────────────────────────────────────────
+ 
+-/// Outbound message sent to the logos-delivery node.
++/// Outbound message sent to the logos-delivery node (plain path).
+ #[derive(Debug, serde::Serialize, serde::Deserialize)]
+ struct WakuMessage {
+     #[serde(rename = "contentTopic")]
+@@ -81,20 +86,72 @@ struct WakuMessage {
+     ephemeral: bool,
+ }
+ 
++/// Outbound message for a reliable channel: the channel already owns the content
++/// topic, so `channel_send` takes only `{payload, ephemeral}`.
++#[derive(Debug, serde::Serialize)]
++struct ChannelMessage {
++    /// Base64-encoded payload.
++    payload: String,
++    ephemeral: bool,
++}
++
++/// A process-unique, non-empty SDS participant id. Must be non-empty (an empty
++/// id disables SDS repair participation upstream) and distinct per node instance
++/// so two participants on one channel are told apart.
++fn new_sender_id() -> String {
++    use std::sync::atomic::{AtomicU64, Ordering};
++    use std::time::{SystemTime, UNIX_EPOCH};
++    static COUNTER: AtomicU64 = AtomicU64::new(0);
++    let nanos = SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_nanos() as u64)
++        .unwrap_or(0);
++    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
++    let pid = std::process::id() as u64;
++    format!("sender-{pid:08x}-{nanos:016x}-{seq:04x}")
++}
++
+ /// Top-level event envelope received from the logos-delivery node callback.
++///
++/// Covers both delivery paths:
++/// - plain relay/filter: `{"eventType":"message_received","message":{contentTopic,payload}}`
++/// - SDS reliable channel: `{"eventType":"channel_message_received","channelId","senderId","payload":"<base64>"}`
++///   (a repaired message is surfaced upstream as an ordinary
++///   `channel_message_received` — there is no separate "repaired" event).
++///
++/// The channel path carries no `contentTopic`; we recover it from `channelId`,
++/// which the wrapper sets equal to the content topic (see [`ThreadedDeliveryWrapper`]).
+ #[derive(Debug, serde::Deserialize, Clone)]
+ pub struct WakuEvent {
+     #[serde(rename = "eventType")]
+     event_type: String,
++    /// Present on `message_received` (plain path).
+     message: Option<ReceivedMessage>,
++    /// Present on `channel_message_received`; equals the content topic.
++    #[serde(rename = "channelId")]
++    channel_id: Option<String>,
++    /// Present on `channel_message_received` (base64 or byte array).
++    payload: Option<WakuPayload>,
+ }
+ 
+ impl WakuEvent {
+-    /// The received message iff this is a `message_received` event.
++    /// The raw upstream `eventType` (e.g. `message_received`,
++    /// `channel_message_received`).
++    pub fn event_type(&self) -> &str {
++        &self.event_type
++    }
++
++    /// The received message, whichever delivery path produced it.
+     pub fn into_received(self) -> Option<ReceivedMessage> {
+-        (self.event_type == "message_received")
+-            .then_some(self.message)
+-            .flatten()
++        match self.event_type.as_str() {
++            "message_received" => self.message,
++            // channelId == content_topic; a repaired message lands here too.
++            "channel_message_received" => Some(ReceivedMessage {
++                content_topic: self.channel_id?,
++                payload: self.payload?,
++            }),
++            _ => None,
++        }
+     }
+ }
+ 
+@@ -249,17 +306,11 @@ impl<T> ThreadedDeliveryWrapper<T> {
+ 
+     /// Publish `payload` on `content_topic`. Blocks until the node acknowledges.
+     pub fn publish(&self, content_topic: &str, payload: &[u8]) -> Result<(), DeliveryError> {
+-        let msg = WakuMessage {
++        debug!(content_topic, payload_len = payload.len(), "Publish");
++        self.send_cmd(NodeOp::Publish {
+             content_topic: content_topic.to_string(),
+-            payload: BASE64.encode(payload),
+-            ephemeral: false,
+-        };
+-
+-        debug!(content_topic = ?msg.content_topic, payload = ?msg.payload, ephemeral = ?msg.ephemeral, "Publish");
+-
+-        let message_json =
+-            serde_json::to_string(&msg).map_err(|e| DeliveryError::PublishFailed(e.to_string()))?;
+-        self.send_cmd(NodeOp::Publish(message_json))
++            payload: payload.to_vec(),
++        })
+     }
+ 
+     /// Take the inbound queue of mapped items. Callable once.
+@@ -280,9 +331,44 @@ impl<T> ThreadedDeliveryWrapper<T> {
+         T: Clone + Send + 'static,
+         F: FnMut(WakuEvent) -> Option<T> + Send + 'static,
+     {
++        // Transport selection. The SDS reliable-channel path (automatic
++        // missed-message repair) is implemented in full below, but is GATED OFF
++        // by default and enabled with LOGOS_DELIVERY_CHANNELS=1.
++        //
++        // Why gated: the channel path is not yet functional end-to-end with any
++        // available native binary (see docs/build-fork-tree.md, node "SDS
++        // reliable channels"):
++        //   1. the shipped prebuilt liblogosdelivery predates upstream #4051, so
++        //      channel_send fails outright ("no provider registered for input
++        //      signature"); and
++        //   2. even against a post-#4051 lib the SDS ingest silently parks the
++        //      first message instead of emitting `channel_message_received`.
++        // Both are below this layer (in the native lib). Defaulting to channels
++        // would silently drop traffic, so plain relay/filter stays the default
++        // until channel delivery is proven with an updated lib + fleet. Flip the
++        // default here (to `!… PLAIN`) once that day comes.
++        let use_channels = matches!(
++            std::env::var("LOGOS_DELIVERY_CHANNELS").as_deref(),
++            Ok("1") | Ok("true")
++        );
++
++        // Optional inbound-event tracing for headless diagnostics.
++        let trace_events = std::env::var("LOGOS_DELIVERY_TRACE").is_ok();
++
++        // SDS repair requires a NON-EMPTY, per-participant sender id (an empty id
++        // disables repair participation upstream). Unique per node instance.
++        let sender_id = new_sender_id();
++
+         // discv5UdpPort defaults to 9000 in libwaku, so a second instance with
+         // a distinct --port still collides on UDP. Bind it to tcp_port so a
+         // single --port knob keeps both ports distinct across instances.
++        //
++        // This flat config shape routes through `parseFlatConf` upstream, which
++        // still builds the full stack WITH the reliable-channel manager
++        // (`channelsConf: Opt.some`) — so channels are available without a
++        // structured `channelsOverrides` block (which cannot be mixed with these
++        // bare kernel fields). SDS defaults apply: 5s ack timeout, 5 retransmits
++        // (~25s repair window), causal history 2.
+         let config_json = serde_json::json!({
+             "logLevel": cfg.log_level,
+             "mode": "Core",
+@@ -310,6 +396,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
+             let Ok(event) = serde_json::from_str::<WakuEvent>(data) else {
+                 return;
+             };
++            if trace_events {
++                eprintln!("[TRACE] event {data}");
++            }
++            // Mode-aware transport filter. When routing through channels, the
++            // plain `message_received` event carries the raw SDS wire bytes
++            // (segmented + enveloped) — the decoded app payload only arrives via
++            // `channel_message_received`. Drop the other transport's events so
++            // the app never sees raw wire bytes (channel mode) or duplicate
++            // channel payloads (plain mode).
++            match (use_channels, event.event_type()) {
++                (true, "message_received") => return,
++                (false, "channel_message_received") => return,
++                _ => {}
++            }
+             let Some(item) = map(event) else {
+                 return;
+             };
+@@ -332,7 +432,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+             let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
+             return;
+         }
+-        info!("logos-delivery node started (preset={})", cfg.preset);
++        info!(
++            "logos-delivery node started (preset={}, transport={}, sender_id={})",
++            cfg.preset,
++            if use_channels { "sds-channels" } else { "plain" },
++            sender_id,
++        );
+ 
+         // FIXME: This unconditional sleep is a stand-in for proper
+         // peer-connectivity detection. The right approach is to listen for a
+@@ -345,17 +450,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
+         let _ = ready_tx.send(Ok(()));
+ 
+         while let Ok(cmd) = out_rx.recv() {
+-            let result = match cmd.op {
+-                NodeOp::Publish(msg) => node
+-                    .send(&msg)
+-                    .map(|_| ())
+-                    .map_err(DeliveryError::PublishFailed),
+-                NodeOp::Subscribe(topic) => node
+-                    .subscribe(&topic)
+-                    .map_err(DeliveryError::SubscribeFailed),
+-                NodeOp::Unsubscribe(topic) => node
+-                    .unsubscribe(&topic)
+-                    .map_err(DeliveryError::UnsubscribeFailed),
++            let result = if use_channels {
++                // ── SDS reliable-channel path (channelId == content_topic) ──
++                //
++                // A reliable channel does NOT subscribe to Waku itself — its
++                // ingress listener filters the node's existing
++                // `MessageReceivedEvent` broker stream by content topic. So the
++                // node must ALSO hold a plain messaging subscription for the
++                // topic, or nothing ever reaches the channel. `ensure` wires
++                // both: the Waku subscription (feeds the broker) + the SDS
++                // channel (unwraps/repairs). Idempotent.
++                //
++                // `strict_sub` surfaces a subscribe failure on the explicit
++                // Subscribe op but tolerates it on the publish path (a repeat
++                // subscribe may already be active).
++                let ensure = |topic: &str, strict_sub: bool| -> Result<(), String> {
++                    if let Err(e) = node.subscribe(topic) {
++                        if strict_sub {
++                            return Err(e);
++                        }
++                    }
++                    node.channel_create(topic, topic, &sender_id)
++                        .map(|_| ())
++                        .or_else(|e| {
++                            if e.contains("already exists") {
++                                Ok(())
++                            } else {
++                                Err(e)
++                            }
++                        })
++                };
++                match cmd.op {
++                    NodeOp::Subscribe(topic) => {
++                        ensure(&topic, true).map_err(DeliveryError::SubscribeFailed)
++                    }
++                    NodeOp::Unsubscribe(topic) => {
++                        let _ = node.channel_close(&topic);
++                        node.unsubscribe(&topic)
++                            .map_err(DeliveryError::UnsubscribeFailed)
++                    }
++                    NodeOp::Publish {
++                        content_topic,
++                        payload,
++                    } => match ensure(&content_topic, false) {
++                        Ok(()) => {
++                            let msg = ChannelMessage {
++                                payload: BASE64.encode(&payload),
++                                ephemeral: false,
++                            };
++                            match serde_json::to_string(&msg) {
++                                Ok(json) => node
++                                    .channel_send(&content_topic, &json)
++                                    .map(|_| ())
++                                    .map_err(DeliveryError::PublishFailed),
++                                Err(e) => Err(DeliveryError::PublishFailed(e.to_string())),
++                            }
++                        }
++                        Err(e) => Err(DeliveryError::PublishFailed(e)),
++                    },
++                }
++            } else {
++                // ── Plain relay/filter path (no backfill) ──
++                match cmd.op {
++                    NodeOp::Subscribe(topic) => node
++                        .subscribe(&topic)
++                        .map_err(DeliveryError::SubscribeFailed),
++                    NodeOp::Unsubscribe(topic) => node
++                        .unsubscribe(&topic)
++                        .map_err(DeliveryError::UnsubscribeFailed),
++                    NodeOp::Publish {
++                        content_topic,
++                        payload,
++                    } => {
++                        let msg = WakuMessage {
++                            content_topic,
++                            payload: BASE64.encode(&payload),
++                            ephemeral: false,
++                        };
++                        match serde_json::to_string(&msg) {
++                            Ok(json) => node
++                                .send(&json)
++                                .map(|_| ())
++                                .map_err(DeliveryError::PublishFailed),
++                            Err(e) => Err(DeliveryError::PublishFailed(e.to_string())),
++                        }
++                    }
++                }
+             };
+             let _ = cmd.reply.try_send(result);
+         }
+diff --git a/extensions/logos-delivery-rust/src/wrapper.rs b/extensions/logos-delivery-rust/src/wrapper.rs
+index 66a82f2..7d32001 100644
+--- a/extensions/logos-delivery-rust/src/wrapper.rs
++++ b/extensions/logos-delivery-rust/src/wrapper.rs
+@@ -193,6 +193,128 @@ impl LogosNodeCtx {
+         result
+     }
+ 
++    /// Create (or restore) an SDS reliable channel. Returns the channel id.
++    ///
++    /// `sender_id` must be non-empty — an empty id disables the node's SDS repair
++    /// participation upstream. Uses the same one-shot heap-boxed callback pattern
++    /// as [`Self::subscribe`]; `createReliableChannel` resolves synchronously
++    /// upstream but the trampoline path handles both sync and async completion.
++    pub fn channel_create(
++        &self,
++        channel_id: &str,
++        content_topic: &str,
++        sender_id: &str,
++    ) -> Result<String, String> {
++        let channel_cstr = CString::new(channel_id).map_err(|e| e.to_string())?;
++        let topic_cstr = CString::new(content_topic).map_err(|e| e.to_string())?;
++        let sender_cstr = CString::new(sender_id).map_err(|e| e.to_string())?;
++
++        let (tx, rx) = mpsc::sync_channel::<Result<String, String>>(1);
++        let closure = move |ret: i32, data: &str| {
++            let _ = tx.send(if ret == RET_OK {
++                Ok(data.to_string())
++            } else {
++                Err(data.to_string())
++            });
++        };
++        let raw = Box::into_raw(Box::new(closure));
++        let cb = get_trampoline(unsafe { &*raw });
++
++        let ret = unsafe {
++            ffi::logosdelivery_channel_create(
++                self.ctx,
++                cb,
++                raw as *const c_void,
++                channel_cstr.as_ptr(),
++                topic_cstr.as_ptr(),
++                sender_cstr.as_ptr(),
++            )
++        };
++
++        if ret != RET_OK {
++            drop(unsafe { Box::from_raw(raw) });
++            return Err(format!("logosdelivery_channel_create returned {ret}"));
++        }
++        let result = rx
++            .recv()
++            .unwrap_or(Err("callback channel disconnected".into()));
++        drop(unsafe { Box::from_raw(raw) });
++        result
++    }
++
++    /// Send on a reliable channel. `message_json`: `{"payload":"<base64>","ephemeral":bool}`.
++    /// Returns the request id on success.
++    pub fn channel_send(&self, channel_id: &str, message_json: &str) -> Result<String, String> {
++        let channel_cstr = CString::new(channel_id).map_err(|e| e.to_string())?;
++        let msg_cstr = CString::new(message_json).map_err(|e| e.to_string())?;
++
++        let (tx, rx) = mpsc::sync_channel::<Result<String, String>>(1);
++        let closure = move |ret: i32, data: &str| {
++            let _ = tx.send(if ret == RET_OK {
++                Ok(data.to_string())
++            } else {
++                Err(data.to_string())
++            });
++        };
++        let raw = Box::into_raw(Box::new(closure));
++        let cb = get_trampoline(unsafe { &*raw });
++
++        let ret = unsafe {
++            ffi::logosdelivery_channel_send(
++                self.ctx,
++                cb,
++                raw as *const c_void,
++                channel_cstr.as_ptr(),
++                msg_cstr.as_ptr(),
++            )
++        };
++
++        if ret != RET_OK {
++            drop(unsafe { Box::from_raw(raw) });
++            return Err(format!("logosdelivery_channel_send returned {ret}"));
++        }
++        let result = rx
++            .recv()
++            .unwrap_or(Err("callback channel disconnected".into()));
++        drop(unsafe { Box::from_raw(raw) });
++        result
++    }
++
++    /// Close a reliable channel.
++    pub fn channel_close(&self, channel_id: &str) -> Result<(), String> {
++        let channel_cstr = CString::new(channel_id).map_err(|e| e.to_string())?;
++
++        let (tx, rx) = mpsc::sync_channel::<Result<(), String>>(1);
++        let closure = move |ret: i32, data: &str| {
++            let _ = tx.send(if ret == RET_OK {
++                Ok(())
++            } else {
++                Err(data.to_string())
++            });
++        };
++        let raw = Box::into_raw(Box::new(closure));
++        let cb = get_trampoline(unsafe { &*raw });
++
++        let ret = unsafe {
++            ffi::logosdelivery_channel_close(
++                self.ctx,
++                cb,
++                raw as *const c_void,
++                channel_cstr.as_ptr(),
++            )
++        };
++
++        if ret != RET_OK {
++            drop(unsafe { Box::from_raw(raw) });
++            return Err(format!("logosdelivery_channel_close returned {ret}"));
++        }
++        let result = rx
++            .recv()
++            .unwrap_or(Err("callback channel disconnected".into()));
++        drop(unsafe { Box::from_raw(raw) });
++        result
++    }
++
+     /// Stores the event callback inside the node so it is dropped *after*
+     /// stop+destroy in Drop, keeping the pointer valid for the node's lifetime.
+     pub fn set_event_callback<C>(&mut self, closure: C)

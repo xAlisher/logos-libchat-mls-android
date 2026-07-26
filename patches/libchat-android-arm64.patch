@@ -2197,7 +2197,7 @@ index 2036116..022e90b 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..d6756e9 100644
+index 2533039..80a3b19 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -27,10 +27,15 @@ pub enum DeliveryError {
@@ -2326,7 +2326,7 @@ index 2533039..d6756e9 100644
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -280,17 +331,97 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -280,17 +331,104 @@ impl<T> ThreadedDeliveryWrapper<T> {
          T: Clone + Send + 'static,
          F: FnMut(WakuEvent) -> Option<T> + Send + 'static,
      {
@@ -2423,7 +2423,14 @@ index 2533039..d6756e9 100644
 +                "clusterId": 2,
 +                "numShardsInNetwork": 8,
 +                "discv5Discovery": false,
++                "peerExchange": false,
 +                "staticnodes": [service_node],
++                // Designated service peers — CONFIRMED on-device to route lightpush +
++                // filter to our node (a lightpush with lightpushnode set reached our
++                // node's protocol handler; staticnodes alone still load-balanced to
++                // fleet peers). This is what actually anchors delivery to our node.
++                "filternode": service_node,
++                "lightpushnode": service_node,
 +                "tcpPort": cfg.port,
 +                "discv5UdpPort": cfg.port,
 +            })
@@ -2432,7 +2439,7 @@ index 2533039..d6756e9 100644
  
          let mut node = match LogosNodeCtx::new(&config_json) {
              Ok(n) => n,
-@@ -310,6 +441,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -310,6 +448,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let Ok(event) = serde_json::from_str::<WakuEvent>(data) else {
                  return;
              };
@@ -2453,7 +2460,7 @@ index 2533039..d6756e9 100644
              let Some(item) = map(event) else {
                  return;
              };
-@@ -332,7 +477,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -332,7 +484,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -2467,7 +2474,7 @@ index 2533039..d6756e9 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -345,17 +495,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -345,17 +502,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
          let _ = ready_tx.send(Ok(()));
  
          while let Ok(cmd) = out_rx.recv() {

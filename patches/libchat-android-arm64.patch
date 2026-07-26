@@ -2197,7 +2197,7 @@ index 2036116..022e90b 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..d363dcc 100644
+index 2533039..d6756e9 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -27,10 +27,15 @@ pub enum DeliveryError {
@@ -2326,7 +2326,7 @@ index 2533039..d363dcc 100644
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -280,17 +331,86 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -280,17 +331,97 @@ impl<T> ThreadedDeliveryWrapper<T> {
          T: Clone + Send + 'static,
          F: FnMut(WakuEvent) -> Option<T> + Send + 'static,
      {
@@ -2362,6 +2362,13 @@ index 2533039..d363dcc 100644
          // a distinct --port still collides on UDP. Bind it to tcp_port so a
          // single --port knob keeps both ports distinct across instances.
 -        let config_json = serde_json::json!({
+-            "logLevel": cfg.log_level,
+-            "mode": "Core",
+-            "preset": cfg.preset,
+-            "tcpPort": cfg.port,
+-            "discv5UdpPort": cfg.port,
+-        })
+-        .to_string();
 +        //
 +        // This flat config shape routes through `parseFlatConf` upstream, which
 +        // still builds the full stack WITH the reliable-channel manager
@@ -2383,41 +2390,49 @@ index 2533039..d363dcc 100644
 +            Ok("Core") => "Core",
 +            _ => "Edge",
 +        };
-+        let mut config = serde_json::json!({
-             "logLevel": cfg.log_level,
--            "mode": "Core",
-+            "mode": mode,
-             "preset": cfg.preset,
-             "tcpPort": cfg.port,
-             "discv5UdpPort": cfg.port,
--        })
--        .to_string();
-+        });
-+        // #219: pin the Edge client to OUR OWN delivery node (self-hosted, cluster-2,
-+        // serves all 8 shards) instead of relying on the flaky public logos.dev fleet
-+        // (fleet outage: docs/fleet-outage-2026-07-26.md, logos-delivery#4064). When
-+        // set, `filternode`/`lightpushnode` are the multiaddr of our node
-+        // (`/dns4/<host>/tcp/<port>/p2p/<peerId>`); the Kotlin layer sets these env
-+        // vars from a KV setting before open (android.system.Os.setenv). Unset = the
-+        // default fleet behaviour (no-op), so this is safe to ship dark. Flat kernel
-+        // fields (parseFlatConf); exact key names verified against a live node in #222.
-+        if let Some(o) = config.as_object_mut() {
-+            if let Ok(fnode) = std::env::var("LOGOS_DELIVERY_FILTERNODE") {
-+                if !fnode.is_empty() {
-+                    o.insert("filternode".into(), serde_json::Value::String(fnode));
-+                }
-+            }
-+            if let Ok(lpnode) = std::env::var("LOGOS_DELIVERY_LIGHTPUSHNODE") {
-+                if !lpnode.is_empty() {
-+                    o.insert("lightpushnode".into(), serde_json::Value::String(lpnode));
-+                }
-+            }
-+        }
++        // #219: pin the Edge client to OUR OWN self-hosted delivery node instead of
++        // the flaky public logos.dev fleet (fleet outage: docs/fleet-outage-2026-07-26.md,
++        // logos-delivery#4064). Our node is a real, inbound-reachable cluster-2 relay
++        // that serves ALL 8 shards + filter + lightpush, so a client anchored to it
++        // gets reliable delivery even when fleet shards are down.
++        //
++        // PROVEN on-device (create ret=0, our node in the filter-peer set, messages
++        // received): the working shape is clusterId+numShardsInNetwork + discv5Discovery
++        // OFF + staticnodes=[our node] (NOT the `preset`, and NOT the `filternode` key
++        // which the client ignored). discv5 off keeps us off flaky fleet discovery;
++        // peer-exchange through our node still finds the rest of cluster-2 as backup.
++        // Override the node via LOGOS_DELIVERY_SERVICE_NODE; set it empty (or
++        // LOGOS_DELIVERY_PRESET_MODE=1) to fall back to the old preset/fleet behaviour.
++        const DEFAULT_SERVICE_NODE: &str =
++            "/dns4/msg.logos.live/tcp/30304/p2p/16Uiu2HAmNdX1s7wRhygyWKmYiUst84329TSz3byLEP6FjcoxDbH4";
++        let service_node = std::env::var("LOGOS_DELIVERY_SERVICE_NODE")
++            .unwrap_or_else(|_| DEFAULT_SERVICE_NODE.to_string());
++        let preset_mode = std::env::var("LOGOS_DELIVERY_PRESET_MODE").is_ok();
++        let config = if preset_mode || service_node.is_empty() {
++            serde_json::json!({
++                "logLevel": cfg.log_level,
++                "mode": mode,
++                "preset": cfg.preset,
++                "tcpPort": cfg.port,
++                "discv5UdpPort": cfg.port,
++            })
++        } else {
++            serde_json::json!({
++                "logLevel": cfg.log_level,
++                "mode": mode,
++                "clusterId": 2,
++                "numShardsInNetwork": 8,
++                "discv5Discovery": false,
++                "staticnodes": [service_node],
++                "tcpPort": cfg.port,
++                "discv5UdpPort": cfg.port,
++            })
++        };
 +        let config_json = config.to_string();
  
          let mut node = match LogosNodeCtx::new(&config_json) {
              Ok(n) => n,
-@@ -310,6 +430,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -310,6 +441,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let Ok(event) = serde_json::from_str::<WakuEvent>(data) else {
                  return;
              };
@@ -2438,7 +2453,7 @@ index 2533039..d363dcc 100644
              let Some(item) = map(event) else {
                  return;
              };
-@@ -332,7 +466,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -332,7 +477,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -2452,7 +2467,7 @@ index 2533039..d363dcc 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -345,17 +484,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -345,17 +495,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
          let _ = ready_tx.send(Ok(()));
  
          while let Ok(cmd) = out_rx.recv() {

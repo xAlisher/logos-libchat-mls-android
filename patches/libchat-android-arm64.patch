@@ -2197,7 +2197,7 @@ index 2036116..022e90b 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..6e8c675 100644
+index 2533039..d363dcc 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -27,10 +27,15 @@ pub enum DeliveryError {
@@ -2326,7 +2326,7 @@ index 2533039..6e8c675 100644
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -280,12 +331,61 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -280,17 +331,86 @@ impl<T> ThreadedDeliveryWrapper<T> {
          T: Clone + Send + 'static,
          F: FnMut(WakuEvent) -> Option<T> + Send + 'static,
      {
@@ -2361,6 +2361,7 @@ index 2533039..6e8c675 100644
          // discv5UdpPort defaults to 9000 in libwaku, so a second instance with
          // a distinct --port still collides on UDP. Bind it to tcp_port so a
          // single --port knob keeps both ports distinct across instances.
+-        let config_json = serde_json::json!({
 +        //
 +        // This flat config shape routes through `parseFlatConf` upstream, which
 +        // still builds the full stack WITH the reliable-channel manager
@@ -2382,14 +2383,41 @@ index 2533039..6e8c675 100644
 +            Ok("Core") => "Core",
 +            _ => "Edge",
 +        };
-         let config_json = serde_json::json!({
++        let mut config = serde_json::json!({
              "logLevel": cfg.log_level,
 -            "mode": "Core",
 +            "mode": mode,
              "preset": cfg.preset,
              "tcpPort": cfg.port,
              "discv5UdpPort": cfg.port,
-@@ -310,6 +410,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
+-        })
+-        .to_string();
++        });
++        // #219: pin the Edge client to OUR OWN delivery node (self-hosted, cluster-2,
++        // serves all 8 shards) instead of relying on the flaky public logos.dev fleet
++        // (fleet outage: docs/fleet-outage-2026-07-26.md, logos-delivery#4064). When
++        // set, `filternode`/`lightpushnode` are the multiaddr of our node
++        // (`/dns4/<host>/tcp/<port>/p2p/<peerId>`); the Kotlin layer sets these env
++        // vars from a KV setting before open (android.system.Os.setenv). Unset = the
++        // default fleet behaviour (no-op), so this is safe to ship dark. Flat kernel
++        // fields (parseFlatConf); exact key names verified against a live node in #222.
++        if let Some(o) = config.as_object_mut() {
++            if let Ok(fnode) = std::env::var("LOGOS_DELIVERY_FILTERNODE") {
++                if !fnode.is_empty() {
++                    o.insert("filternode".into(), serde_json::Value::String(fnode));
++                }
++            }
++            if let Ok(lpnode) = std::env::var("LOGOS_DELIVERY_LIGHTPUSHNODE") {
++                if !lpnode.is_empty() {
++                    o.insert("lightpushnode".into(), serde_json::Value::String(lpnode));
++                }
++            }
++        }
++        let config_json = config.to_string();
+ 
+         let mut node = match LogosNodeCtx::new(&config_json) {
+             Ok(n) => n,
+@@ -310,6 +430,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let Ok(event) = serde_json::from_str::<WakuEvent>(data) else {
                  return;
              };
@@ -2410,7 +2438,7 @@ index 2533039..6e8c675 100644
              let Some(item) = map(event) else {
                  return;
              };
-@@ -332,7 +446,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -332,7 +466,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -2424,7 +2452,7 @@ index 2533039..6e8c675 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -345,17 +464,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -345,17 +484,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
          let _ = ready_tx.send(Ok(()));
  
          while let Ok(cmd) = out_rx.recv() {

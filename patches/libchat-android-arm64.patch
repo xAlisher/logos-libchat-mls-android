@@ -2148,13 +2148,33 @@ index 0000000..b02bbd0
 +    std::process::exit(0);
 +}
 diff --git a/extensions/logos-delivery-rust/src/sys.rs b/extensions/logos-delivery-rust/src/sys.rs
-index 2036116..022e90b 100644
+index 2036116..6c38816 100644
 --- a/extensions/logos-delivery-rust/src/sys.rs
 +++ b/extensions/logos-delivery-rust/src/sys.rs
-@@ -69,6 +69,44 @@ unsafe extern "C" {
+@@ -69,6 +69,64 @@ unsafe extern "C" {
          user_data: *const c_void,
          node_info_id: *const c_char,
      ) -> c_int;
++
++    /// nwaku historical store query (libwaku's raw `waku_store_query`, exported by
++    /// the same .so). `json_query` is a **camelCase** store query, e.g.
++    /// `{"requestId":"..","includeData":true,"contentTopics":["/logos-chat/1/../proto"],
++    /// "timeStart":<ns>,"timeEnd":<ns>,"paginationLimit":50,"paginationForward":false}`.
++    /// `peer_addr` is the store peer multiaddr to query; `timeout_ms` the request
++    /// timeout. The response JSON (`{"statusCode":200,"messages":[{"message":{payload,
++    /// contentTopic,..}}]}`) is delivered to `cb`.
++    ///
++    /// PROVEN on-device (2026-07-26): a `pubsubTopic` filter silently returns 0 —
++    /// query by `contentTopics` only (the node autoshards) plus a `timeStart`/`timeEnd`
++    /// window. Used for missed-welcome catch-up (#228).
++    pub fn waku_store_query(
++        ctx: *mut c_void,
++        cb: FFICallBack,
++        user_data: *const c_void,
++        json_query: *const c_char,
++        peer_addr: *const c_char,
++        timeout_ms: c_int,
++    ) -> c_int;
 +
 +    // ── SDS reliable channels ──────────────────────────────────────────────
 +    //
@@ -2197,7 +2217,7 @@ index 2036116..022e90b 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..80a3b19 100644
+index 2533039..fca6b1b 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -27,10 +27,15 @@ pub enum DeliveryError {
@@ -2304,7 +2324,46 @@ index 2533039..80a3b19 100644
      }
  }
  
-@@ -249,17 +306,11 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -136,6 +193,38 @@ impl WakuPayload {
+     }
+ }
+ 
++// ── Store query (missed-welcome catch-up, #228) ───────────────────────────────
++
++/// Response envelope from `waku_store_query`. Only the fields we replay.
++#[derive(Debug, serde::Deserialize)]
++struct StoreResponse {
++    #[serde(rename = "statusCode")]
++    status_code: Option<i32>,
++    messages: Option<Vec<StoreEntry>>,
++}
++
++#[derive(Debug, serde::Deserialize)]
++struct StoreEntry {
++    message: Option<StoreMessage>,
++}
++
++/// A stored message; the node returns the payload as a JSON byte array (proven
++/// on-device 2026-07-26) which deserializes to [`WakuPayload::Bytes`].
++#[derive(Debug, serde::Deserialize)]
++struct StoreMessage {
++    #[serde(rename = "contentTopic")]
++    content_topic: Option<String>,
++    payload: Option<WakuPayload>,
++}
++
++/// A process-unique store-query request id (nwaku may cache/dedupe by requestId).
++fn new_request_id() -> String {
++    use std::sync::atomic::{AtomicU64, Ordering};
++    static COUNTER: AtomicU64 = AtomicU64::new(0);
++    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
++    format!("catchup-{:08x}-{seq:08x}", std::process::id())
++}
++
+ // ── ThreadedDeliveryWrapper ─────────────────────────────────────────────────
+ 
+ /// Owns the embedded node on a dedicated thread. Generic over the inbound item
+@@ -249,17 +338,11 @@ impl<T> ThreadedDeliveryWrapper<T> {
  
      /// Publish `payload` on `content_topic`. Blocks until the node acknowledges.
      pub fn publish(&self, content_topic: &str, payload: &[u8]) -> Result<(), DeliveryError> {
@@ -2326,7 +2385,13 @@ index 2533039..80a3b19 100644
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -280,17 +331,104 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -275,22 +358,112 @@ impl<T> ThreadedDeliveryWrapper<T> {
+         subscribers: SubscriberList<T>,
+         inbound_tx: Sender<T>,
+         ready_tx: mpsc::Sender<Result<(), DeliveryError>>,
+-        mut map: F,
++        map: F,
+     ) where
          T: Clone + Send + 'static,
          F: FnMut(WakuEvent) -> Option<T> + Send + 'static,
      {
@@ -2407,6 +2472,9 @@ index 2533039..80a3b19 100644
 +            "/dns4/msg.logos.live/tcp/30304/p2p/16Uiu2HAmNdX1s7wRhygyWKmYiUst84329TSz3byLEP6FjcoxDbH4";
 +        let service_node = std::env::var("LOGOS_DELIVERY_SERVICE_NODE")
 +            .unwrap_or_else(|_| DEFAULT_SERVICE_NODE.to_string());
++        // The store peer used for missed-welcome catch-up (#228). Same node we
++        // anchor filter/lightpush to; empty in preset/fleet mode → catch-up is off.
++        let store_peer = service_node.clone();
 +        let preset_mode = std::env::var("LOGOS_DELIVERY_PRESET_MODE").is_ok();
 +        let config = if preset_mode || service_node.is_empty() {
 +            serde_json::json!({
@@ -2439,10 +2507,20 @@ index 2533039..80a3b19 100644
  
          let mut node = match LogosNodeCtx::new(&config_json) {
              Ok(n) => n,
-@@ -310,6 +448,20 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -305,12 +478,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
+         // yet in the subscriber list.
+         subscribers.lock().unwrap().push(inbound_tx);
+ 
++        // Share the mapper between the live event callback and store catch-up:
++        // both turn a WakuEvent into an inbound item via the same filter/decode.
++        let map = Arc::new(Mutex::new(map));
++        let map_for_cb = map.clone();
+         let subs_for_cb = subscribers.clone();
+         let event_closure = move |_ret: i32, data: &str| {
              let Ok(event) = serde_json::from_str::<WakuEvent>(data) else {
                  return;
              };
+-            let Some(item) = map(event) else {
 +            if trace_events {
 +                eprintln!("[TRACE] event {data}");
 +            }
@@ -2457,10 +2535,20 @@ index 2533039..80a3b19 100644
 +                (false, "channel_message_received") => return,
 +                _ => {}
 +            }
-             let Some(item) = map(event) else {
++            let Some(item) = ({
++                let mut m = match map_for_cb.lock() {
++                    Ok(g) => g,
++                    Err(e) => {
++                        error!("mapper mutex poisoned: {e}");
++                        return;
++                    }
++                };
++                m(event)
++            }) else {
                  return;
              };
-@@ -332,7 +484,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+             let mut guard = match subs_for_cb.lock() {
+@@ -332,7 +532,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -2474,9 +2562,22 @@ index 2533039..80a3b19 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -345,17 +502,92 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -344,22 +549,246 @@ impl<T> ThreadedDeliveryWrapper<T> {
+ 
          let _ = ready_tx.send(Ok(()));
  
++        // Share the node with detached store-catch-up threads. Arc also makes
++        // teardown safe: the node's Drop (stop+destroy) only runs once the loop
++        // AND any in-flight catch-up thread have released their handle, so a
++        // catch-up store_query can never race the async destroy.
++        let node = Arc::new(node);
++
++        // Topics already store-caught-up this session. Catch-up runs at most ONCE
++        // per topic: replaying history can make the app re-subscribe (processing a
++        // recovered message re-opens/re-subscribes its conversation), and without
++        // this guard that feedback loops into unbounded store queries (#228).
++        let mut caught_up: std::collections::HashSet<String> = std::collections::HashSet::new();
++
          while let Ok(cmd) = out_rx.recv() {
 -            let result = match cmd.op {
 -                NodeOp::Publish(msg) => node
@@ -2489,6 +2590,12 @@ index 2533039..80a3b19 100644
 -                NodeOp::Unsubscribe(topic) => node
 -                    .unsubscribe(&topic)
 -                    .map_err(DeliveryError::UnsubscribeFailed),
++            // A subscribe triggers a store catch-up (#228) once acknowledged — but
++            // only the first time we see each topic (see `caught_up` above).
++            let catch_up_topic = match &cmd.op {
++                NodeOp::Subscribe(t) if !caught_up.contains(t) => Some(t.clone()),
++                _ => None,
+             };
 +            let result = if use_channels {
 +                // ── SDS reliable-channel path (channelId == content_topic) ──
 +                //
@@ -2575,14 +2682,149 @@ index 2533039..80a3b19 100644
 +                        }
 +                    }
 +                }
-             };
++            };
++            // Ack the caller BEFORE catch-up so the subscribe returns promptly;
++            // the catch-up then runs (serially) on this node thread.
++            let ok = result.is_ok();
              let _ = cmd.reply.try_send(result);
++            if ok {
++                if let Some(topic) = catch_up_topic {
++                    caught_up.insert(topic.clone());
++                    // Detach: catch-up must not block the command loop (the first,
++                    // inbox subscribe can wait on the store peer connection).
++                    let node = node.clone();
++                    let subscribers = subscribers.clone();
++                    let map = map.clone();
++                    let store_peer = store_peer.clone();
++                    thread::spawn(move || {
++                        Self::store_catch_up(&node, &store_peer, &topic, &subscribers, &map);
++                    });
++                }
++            }
          }
+ 
+         info!("logos-node command loop finished");
+     }
++
++    /// Replay recent history for `content_topic` from the store `peer` so a client
++    /// that was offline when a welcome/message was published still receives it
++    /// (missed-welcome catch-up, #228). Best-effort — never fails the caller.
++    /// Runs on the node thread; each recovered message is fed through the SAME
++    /// mapper + inbound fan-out as a live message, so MLS de-dupes replays and the
++    /// app treats an already-seen welcome as a benign inbound error.
++    fn store_catch_up<F>(
++        node: &LogosNodeCtx,
++        peer: &str,
++        content_topic: &str,
++        subscribers: &SubscriberList<T>,
++        map: &Arc<Mutex<F>>,
++    ) where
++        T: Clone,
++        F: FnMut(WakuEvent) -> Option<T>,
++    {
++        if peer.is_empty() {
++            return; // preset/fleet mode has no designated store peer
++        }
++        use std::time::{SystemTime, UNIX_EPOCH};
++        let now_ns = SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .map(|d| d.as_nanos() as u64)
++            .unwrap_or(0);
++        // Look back 30 days (bounded by the store peer's retention) so a device
++        // offline for a long stretch still catches its missed welcomes.
++        const DAY_NS: u64 = 24 * 3600 * 1_000_000_000;
++        let start_ns = now_ns.saturating_sub(30 * DAY_NS);
++        let end_ns = now_ns.saturating_add(3600 * 1_000_000_000);
++        // PROVEN on-device (2026-07-26): query by contentTopics only (NO
++        // pubsubTopic — that filter silently returns 0) plus a time window.
++        let query = serde_json::json!({
++            "requestId": new_request_id(),
++            "includeData": true,
++            "contentTopics": [content_topic],
++            "timeStart": start_ns,
++            "timeEnd": end_ns,
++            "paginationLimit": 50,
++            "paginationForward": false,
++        })
++        .to_string();
++
++        // One retry: the first subscribe can land before the store peer connection
++        // is fully up; the 15s request timeout usually absorbs the dial.
++        let mut resp = None;
++        for attempt in 0..2 {
++            match node.store_query(&query, peer, 15_000) {
++                Ok(r) => {
++                    resp = Some(r);
++                    break;
++                }
++                Err(e) => {
++                    debug!("store catch-up query failed (attempt {attempt}): {e}");
++                    if attempt == 0 {
++                        thread::sleep(Duration::from_secs(3));
++                    }
++                }
++            }
++        }
++        let Some(resp) = resp else { return };
++        let parsed: StoreResponse = match serde_json::from_str(&resp) {
++            Ok(p) => p,
++            Err(e) => {
++                debug!("store catch-up parse failed: {e}");
++                return;
++            }
++        };
++        if parsed.status_code != Some(200) {
++            debug!("store catch-up non-200: {:?}", parsed.status_code);
++            return;
++        }
++        let messages = parsed.messages.unwrap_or_default();
++        let mut replayed = 0usize;
++        for entry in messages {
++            let Some(m) = entry.message else { continue };
++            let (Some(ct), Some(payload)) = (m.content_topic, m.payload) else {
++                continue;
++            };
++            // Rebuild a plain message-received event and run it through the SAME
++            // mapper the live callback uses (content-topic filter + payload
++            // decode), then fan out to the inbound queue like a live message.
++            let event = WakuEvent {
++                event_type: "message_received".to_string(),
++                message: Some(ReceivedMessage {
++                    content_topic: ct,
++                    payload,
++                }),
++                channel_id: None,
++                payload: None,
++            };
++            let item = {
++                let mut m = match map.lock() {
++                    Ok(g) => g,
++                    Err(_) => return,
++                };
++                m(event)
++            };
++            let Some(item) = item else { continue };
++            let mut guard = match subscribers.lock() {
++                Ok(g) => g,
++                Err(_) => return,
++            };
++            guard.retain(|tx| match tx.try_send(item.clone()) {
++                Ok(()) => true,
++                Err(crossbeam_channel::TrySendError::Full(_)) => true,
++                Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
++            });
++            replayed += 1;
++        }
++        if replayed > 0 {
++            info!("store catch-up: replayed {replayed} message(s) for {content_topic}");
++        }
++    }
+ }
 diff --git a/extensions/logos-delivery-rust/src/wrapper.rs b/extensions/logos-delivery-rust/src/wrapper.rs
-index 66a82f2..7d32001 100644
+index 66a82f2..18340bf 100644
 --- a/extensions/logos-delivery-rust/src/wrapper.rs
 +++ b/extensions/logos-delivery-rust/src/wrapper.rs
-@@ -193,6 +193,128 @@ impl LogosNodeCtx {
+@@ -193,6 +193,174 @@ impl LogosNodeCtx {
          result
      }
  
@@ -2700,6 +2942,52 @@ index 66a82f2..7d32001 100644
 +        if ret != RET_OK {
 +            drop(unsafe { Box::from_raw(raw) });
 +            return Err(format!("logosdelivery_channel_close returned {ret}"));
++        }
++        let result = rx
++            .recv()
++            .unwrap_or(Err("callback channel disconnected".into()));
++        drop(unsafe { Box::from_raw(raw) });
++        result
++    }
++
++    /// Query the historical message store on `peer_addr`. `json_query` is a
++    /// camelCase nwaku store query (see [`super::sys::waku_store_query`]). Returns
++    /// the raw response JSON (`{"statusCode":200,"messages":[...]}`) on success.
++    /// Blocks until the store peer answers or `timeout_ms` elapses.
++    pub fn store_query(
++        &self,
++        json_query: &str,
++        peer_addr: &str,
++        timeout_ms: i32,
++    ) -> Result<String, String> {
++        let query_cstr = CString::new(json_query).map_err(|e| e.to_string())?;
++        let peer_cstr = CString::new(peer_addr).map_err(|e| e.to_string())?;
++
++        let (tx, rx) = mpsc::sync_channel::<Result<String, String>>(1);
++        let closure = move |ret: i32, data: &str| {
++            let _ = tx.send(if ret == RET_OK {
++                Ok(data.to_string())
++            } else {
++                Err(data.to_string())
++            });
++        };
++        let raw = Box::into_raw(Box::new(closure));
++        let cb = get_trampoline(unsafe { &*raw });
++
++        let ret = unsafe {
++            ffi::waku_store_query(
++                self.ctx,
++                cb,
++                raw as *const c_void,
++                query_cstr.as_ptr(),
++                peer_cstr.as_ptr(),
++                timeout_ms,
++            )
++        };
++
++        if ret != RET_OK {
++            drop(unsafe { Box::from_raw(raw) });
++            return Err(format!("waku_store_query returned {ret}"));
 +        }
 +        let result = rx
 +            .recv()

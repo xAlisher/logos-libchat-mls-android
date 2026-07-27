@@ -1765,6 +1765,24 @@ index 18877e7..afca93e 100644
              ConversationKind::Unknown(_) => None,
          }
      }
+diff --git a/core/conversations/src/service_traits.rs b/core/conversations/src/service_traits.rs
+index dac2516..7043542 100644
+--- a/core/conversations/src/service_traits.rs
++++ b/core/conversations/src/service_traits.rs
+@@ -17,6 +17,13 @@ pub trait DeliveryService: Debug {
+     type Error: Display + Debug;
+     fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error>;
+     fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error>;
++    /// #237: enable/disable the underlying delivery networking WITHOUT tearing the
++    /// transport down (so an embedded node's MLS engine stays alive for off-node
++    /// transports like BLE). Default no-op for transports that don't support it
++    /// (e.g. the in-process test transport).
++    fn set_active(&mut self, _active: bool) -> Result<(), Self::Error> {
++        Ok(())
++    }
+ }
+ 
+ /// Manages key bundle storage for MLS group creation/addition while contacts are
 diff --git a/core/crypto/src/signatures.rs b/core/crypto/src/signatures.rs
 index bba6e10..f8d4ee4 100644
 --- a/core/crypto/src/signatures.rs
@@ -1982,7 +2000,7 @@ index d05b05a..0f74993 100644
 +{
 +}
 diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
-index a684ecd..f1f9455 100644
+index a684ecd..f8fbedc 100644
 --- a/crates/generic-chat/src/client.rs
 +++ b/crates/generic-chat/src/client.rs
 @@ -6,8 +6,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
@@ -2055,7 +2073,26 @@ index a684ecd..f1f9455 100644
              },
              event_rx,
          )
-@@ -222,6 +241,20 @@ where
+@@ -169,6 +188,18 @@ where
+         self.core.lock().installation_name().to_string()
+     }
+ 
++    /// #237: pause/resume the delivery transport's networking without dropping the
++    /// client. The MLS engine (encrypt/decrypt, incl. off-node BLE via
++    /// `encrypt_for_convo`/`ingest_ciphertext`) stays available while Waku is
++    /// paused, so "Logos off" can still message over the BLE mesh.
++    pub fn set_delivery_active(&mut self, active: bool) -> Result<(), ClientError> {
++        self.core
++            .lock()
++            .ds()
++            .set_active(active)
++            .map_err(|e| ClientError::Transport(e.to_string()))
++    }
++
+     // Creates a conversation between two Accounts.
+     pub fn create_direct_conversation(
+         &mut self,
+@@ -222,6 +253,20 @@ where
              .map_err(Into::into)
      }
  
@@ -2076,7 +2113,7 @@ index a684ecd..f1f9455 100644
      /// The group's roster, one [`GroupMember`] per account (self included). An
      /// account's several devices collapse to a single entry surfacing that
      /// account; a member whose account claim the directory can't confirm stays
-@@ -246,6 +279,15 @@ where
+@@ -246,6 +291,15 @@ where
              .map_err(Into::into)
      }
  
@@ -2092,7 +2129,7 @@ index a684ecd..f1f9455 100644
      /// List all conversation IDs known to this client.
      pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
          self.core.lock().list_conversations().map_err(Into::into)
-@@ -260,6 +302,31 @@ where
+@@ -260,6 +314,31 @@ where
              .map_err(Into::into)
      }
  
@@ -2124,7 +2161,7 @@ index a684ecd..f1f9455 100644
      /// Resolve an account address to the signer (device) ids its published
      /// directory bundle endorses. A reachable account has published at least
      /// one signer; anything else is an error.
-@@ -310,6 +377,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -310,6 +389,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      core: Arc<Mutex<ClientCore<T, R, S>>>,
      directory: R,
      inbound: Receiver<Vec<u8>>,
@@ -2132,7 +2169,7 @@ index a684ecd..f1f9455 100644
      wakeup_events: Receiver<WakeupEvent>,
      shutdown: Receiver<()>,
      event_tx: Sender<Event>,
-@@ -317,28 +385,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -317,28 +397,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      T: DeliveryService + Send + 'static,
      R: RegistrationService + AccountDirectory + Send + 'static,
  {
@@ -2399,6 +2436,23 @@ index 2bf84f9..009d6ea 100644
  impl Default for MemStore {
      fn default() -> Self {
          Self::new()
+diff --git a/extensions/embedded-logos-delivery/src/lib.rs b/extensions/embedded-logos-delivery/src/lib.rs
+index a9c83cb..ca24901 100644
+--- a/extensions/embedded-logos-delivery/src/lib.rs
++++ b/extensions/embedded-logos-delivery/src/lib.rs
+@@ -87,6 +87,12 @@ impl DeliveryService for EmbeddedLogosDelivery {
+     ) -> Result<(), <Self as DeliveryService>::Error> {
+         self.inner.subscribe(&content_topic_for(delivery_address))
+     }
++
++    /// #237: pause/resume the embedded node's Waku networking (filter/lightpush +
++    /// subscriptions) while keeping the node — and the MLS engine — alive.
++    fn set_active(&mut self, active: bool) -> Result<(), DeliveryError> {
++        self.inner.set_active(active)
++    }
+ }
+ 
+ // Teaching the service the inbound half makes it a full client transport, so
 diff --git a/extensions/logos-delivery-rust/build.rs b/extensions/logos-delivery-rust/build.rs
 index e015061..85ee0cc 100644
 --- a/extensions/logos-delivery-rust/build.rs
@@ -2415,127 +2469,6 @@ index e015061..85ee0cc 100644
          other => panic!("unsupported OS for logos-delivery transport: {other}"),
      }
  
-diff --git a/extensions/logos-delivery-rust/examples/channel_repair.rs b/extensions/logos-delivery-rust/examples/channel_repair.rs
-new file mode 100644
-index 0000000..b02bbd0
---- /dev/null
-+++ b/extensions/logos-delivery-rust/examples/channel_repair.rs
-@@ -0,0 +1,115 @@
-+//! Role-based delivery peer for the SDS reliable-channel repair proof
-+//! (logos-chat-android#211). ONE node per process (nwaku keeps process-global
-+//! state, so multiple nodes must live in separate processes).
-+//!
-+//! Usage:
-+//!   channel_repair recv <topic> <port>
-+//!       Subscribe and print `## GOT <utf8>` for every message, forever.
-+//!   channel_repair send <topic> <port> <delay_m0_s> <delay_m1_s>
-+//!       Subscribe, then at t=<delay_m0> publish "M0-live" and at t=<delay_m1>
-+//!       publish "M1-while-offline"; then stay alive so SDS keeps retransmitting
-+//!       the unacked message (that retransmission is the repair mechanism).
-+//!
-+//! Transport is chosen by the migrated delivery layer: SDS reliable channels by
-+//! default, plain relay/filter when LOGOS_DELIVERY_PLAIN=1 (for the A/B contrast).
-+//!
-+//! Driven by scripts/channel-repair-proof.sh on-device. Requires LD_LIBRARY_PATH
-+//! at liblogosdelivery.so + librln.so.
-+
-+use std::io::Write;
-+use std::time::Duration;
-+
-+use logos_delivery::{P2pConfig, ThreadedDeliveryWrapper, WakuEvent};
-+
-+fn say(s: &str) {
-+    println!("{s}");
-+    let _ = std::io::stdout().flush();
-+}
-+
-+fn main() {
-+    let args: Vec<String> = std::env::args().collect();
-+    let role = args.get(1).cloned().unwrap_or_default();
-+    let topic = args.get(2).cloned().expect("usage: <role> <topic> <port> ...");
-+    let port: u16 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
-+
-+    // Channels are opt-in (LOGOS_DELIVERY_CHANNELS=1); plain relay/filter is the
-+    // default — mirrors the gating in ThreadedDeliveryWrapper.
-+    let channels = matches!(
-+        std::env::var("LOGOS_DELIVERY_CHANNELS").as_deref(),
-+        Ok("1") | Ok("true")
-+    );
-+    let plain = !channels;
-+
-+    let log_level = std::env::var("LOGLEVEL").unwrap_or_else(|_| "ERROR".into());
-+    let want = topic.clone();
-+    let mut node = ThreadedDeliveryWrapper::<String>::start(
-+        P2pConfig {
-+            port,
-+            log_level,
-+            ..Default::default()
-+        },
-+        move |ev: WakuEvent| {
-+            let m = ev.into_received()?;
-+            if m.content_topic() != want {
-+                return None;
-+            }
-+            String::from_utf8(m.into_payload()?).ok()
-+        },
-+    )
-+    .expect("node start");
-+    node.subscribe(&topic).expect("subscribe");
-+    let rx = node.inbound_queue();
-+
-+    say(&format!(
-+        "## READY role={role} port={port} transport={}",
-+        if plain { "plain" } else { "sds-channels" }
-+    ));
-+
-+    match role.as_str() {
-+        "recv" => loop {
-+            if let Ok(m) = rx.recv_timeout(Duration::from_millis(500)) {
-+                say(&format!("## GOT {m}"));
-+            }
-+        },
-+        // Interactive: drain inbound in a thread, publish on `pub <text>` from
-+        // stdin. Lets an external orchestrator control exact publish timing.
-+        "peer" => {
-+            std::thread::spawn(move || loop {
-+                if let Ok(m) = rx.recv_timeout(Duration::from_millis(500)) {
-+                    say(&format!("## GOT {m}"));
-+                }
-+            });
-+            let stdin = std::io::stdin();
-+            let mut line = String::new();
-+            loop {
-+                line.clear();
-+                if std::io::BufRead::read_line(&mut stdin.lock(), &mut line).unwrap_or(0) == 0 {
-+                    break;
-+                }
-+                let cmd = line.trim();
-+                if let Some(text) = cmd.strip_prefix("pub ") {
-+                    match node.publish(&topic, text.as_bytes()) {
-+                        Ok(()) => say(&format!("## PUBLISHED {text}")),
-+                        Err(e) => say(&format!("## PUBERR {e}")),
-+                    }
-+                } else if cmd == "quit" {
-+                    break;
-+                }
-+            }
-+        }
-+        "send" => {
-+            let d0: u64 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(20);
-+            let d1: u64 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(45);
-+            std::thread::sleep(Duration::from_secs(d0));
-+            node.publish(&topic, b"M0-live").expect("publish M0");
-+            say("## PUBLISHED M0-live");
-+            std::thread::sleep(Duration::from_secs(d1.saturating_sub(d0)));
-+            node.publish(&topic, b"M1-while-offline").expect("publish M1");
-+            say("## PUBLISHED M1-while-offline");
-+            // Stay alive so SDS keeps retransmitting the unacked M1.
-+            std::thread::sleep(Duration::from_secs(120));
-+        }
-+        _ => eprintln!("usage: channel_repair <send|recv> <topic> <port> [d0 d1]"),
-+    }
-+    std::process::exit(0);
-+}
 diff --git a/extensions/logos-delivery-rust/src/sys.rs b/extensions/logos-delivery-rust/src/sys.rs
 index 2036116..6c38816 100644
 --- a/extensions/logos-delivery-rust/src/sys.rs
@@ -2606,10 +2539,16 @@ index 2036116..6c38816 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..fca6b1b 100644
+index 2533039..93b2429 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
-@@ -27,10 +27,15 @@ pub enum DeliveryError {
+@@ -1,3 +1,5 @@
++use std::collections::HashSet;
++use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::{Arc, Mutex, mpsc};
+ use std::thread;
+ use std::time::Duration;
+@@ -27,10 +29,15 @@ pub enum DeliveryError {
  
  // ── Internals ────────────────────────────────────────────────────────────────
  
@@ -2627,7 +2566,7 @@ index 2533039..fca6b1b 100644
      Subscribe(String),   // content_topic
      Unsubscribe(String), // content_topic
  }
-@@ -71,7 +76,7 @@ impl Default for P2pConfig {
+@@ -71,7 +78,7 @@ impl Default for P2pConfig {
  
  // ── Wire types ──────────────────────────────────────────────────────────────
  
@@ -2636,7 +2575,7 @@ index 2533039..fca6b1b 100644
  #[derive(Debug, serde::Serialize, serde::Deserialize)]
  struct WakuMessage {
      #[serde(rename = "contentTopic")]
-@@ -81,20 +86,72 @@ struct WakuMessage {
+@@ -81,20 +88,72 @@ struct WakuMessage {
      ephemeral: bool,
  }
  
@@ -2713,7 +2652,7 @@ index 2533039..fca6b1b 100644
      }
  }
  
-@@ -136,6 +193,38 @@ impl WakuPayload {
+@@ -136,6 +195,38 @@ impl WakuPayload {
      }
  }
  
@@ -2752,11 +2691,76 @@ index 2533039..fca6b1b 100644
  // ── ThreadedDeliveryWrapper ─────────────────────────────────────────────────
  
  /// Owns the embedded node on a dedicated thread. Generic over the inbound item
-@@ -249,17 +338,11 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -147,6 +238,14 @@ pub struct ThreadedDeliveryWrapper<T = WakuEvent> {
+     #[allow(dead_code)]
+     subscribers: SubscriberList<T>,
+     inbound_rx: Option<Receiver<T>>,
++    /// #237: delivery on/off. When false, publishes are dropped and the node is
++    /// unsubscribed from every tracked topic (no filter inbound, no lightpush) —
++    /// so "Logos off" genuinely stops Waku messaging while the node/MLS engine
++    /// stays alive for BLE. Shared across clones (they drive the same node).
++    active: Arc<AtomicBool>,
++    /// #237: every content topic the client asked to subscribe to. Kept so a
++    /// pause can unsubscribe them all and a resume can re-subscribe them.
++    topics: Arc<Mutex<HashSet<String>>>,
+ }
+ 
+ // Manual impls so `T` carries no `Clone`/`Debug` bound at the struct level —
+@@ -157,6 +256,8 @@ impl<T> Clone for ThreadedDeliveryWrapper<T> {
+             outbound: self.outbound.clone(),
+             subscribers: self.subscribers.clone(),
+             inbound_rx: self.inbound_rx.clone(),
++            active: self.active.clone(),
++            topics: self.topics.clone(),
+         }
+     }
+ }
+@@ -220,6 +321,8 @@ impl<T> ThreadedDeliveryWrapper<T> {
+             outbound: out_tx,
+             subscribers,
+             inbound_rx: Some(inbound_rx),
++            active: Arc::new(AtomicBool::new(true)),
++            topics: Arc::new(Mutex::new(HashSet::new())),
+         })
+     }
+ 
+@@ -236,30 +339,65 @@ impl<T> ThreadedDeliveryWrapper<T> {
+     }
+ 
+     /// Start delivering messages on `content_topic`. Blocks until acknowledged.
++    /// #237: the topic is always tracked (so a resume can re-subscribe it); the
++    /// node subscription only fires while delivery is active — subscribing while
++    /// paused just records it.
+     pub fn subscribe(&self, content_topic: &str) -> Result<(), DeliveryError> {
+         debug!(?content_topic, "Subscribe");
+-        self.send_cmd(NodeOp::Subscribe(content_topic.to_string()))
++        self.topics
++            .lock()
++            .unwrap()
++            .insert(content_topic.to_string());
++        if self.active.load(Ordering::Relaxed) {
++            self.send_cmd(NodeOp::Subscribe(content_topic.to_string()))
++        } else {
++            Ok(())
++        }
+     }
+ 
+     /// Stop delivering messages on `content_topic`. Blocks until acknowledged.
+     pub fn unsubscribe(&self, content_topic: &str) -> Result<(), DeliveryError> {
+         debug!(?content_topic, "Unsubscribe");
++        self.topics.lock().unwrap().remove(content_topic);
+         self.send_cmd(NodeOp::Unsubscribe(content_topic.to_string()))
+     }
  
      /// Publish `payload` on `content_topic`. Blocks until the node acknowledges.
++    /// #237: a no-op while delivery is paused ("Logos off") — the caller routes the
++    /// message over another transport (BLE/mesh); it must NOT hit Waku.
      pub fn publish(&self, content_topic: &str, payload: &[u8]) -> Result<(), DeliveryError> {
 -        let msg = WakuMessage {
++        if !self.active.load(Ordering::Relaxed) {
++            debug!(content_topic, "Publish suppressed (delivery paused)");
++            return Ok(());
++        }
 +        debug!(content_topic, payload_len = payload.len(), "Publish");
 +        self.send_cmd(NodeOp::Publish {
              content_topic: content_topic.to_string(),
@@ -2765,16 +2769,38 @@ index 2533039..fca6b1b 100644
 -        };
 -
 -        debug!(content_topic = ?msg.content_topic, payload = ?msg.payload, ephemeral = ?msg.ephemeral, "Publish");
--
++            payload: payload.to_vec(),
++        })
++    }
+ 
 -        let message_json =
 -            serde_json::to_string(&msg).map_err(|e| DeliveryError::PublishFailed(e.to_string()))?;
 -        self.send_cmd(NodeOp::Publish(message_json))
-+            payload: payload.to_vec(),
-+        })
++    /// #237: turn Waku delivery on/off without tearing down the node (so the MLS
++    /// engine stays available for BLE). Pausing unsubscribes every tracked topic
++    /// (stops filter inbound) and makes `publish` a no-op (stops lightpush);
++    /// resuming re-subscribes them. Idempotent. Best-effort per topic.
++    pub fn set_active(&self, active: bool) -> Result<(), DeliveryError> {
++        if self.active.swap(active, Ordering::Relaxed) == active {
++            return Ok(());
++        }
++        let topics: Vec<String> = self.topics.lock().unwrap().iter().cloned().collect();
++        info!(active, topic_count = topics.len(), "delivery set_active");
++        for t in topics {
++            let op = if active {
++                NodeOp::Subscribe(t)
++            } else {
++                NodeOp::Unsubscribe(t)
++            };
++            if let Err(e) = self.send_cmd(op) {
++                debug!("set_active topic op failed: {e}");
++            }
++        }
++        Ok(())
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -275,22 +358,112 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -275,22 +413,112 @@ impl<T> ThreadedDeliveryWrapper<T> {
          subscribers: SubscriberList<T>,
          inbound_tx: Sender<T>,
          ready_tx: mpsc::Sender<Result<(), DeliveryError>>,
@@ -2896,7 +2922,7 @@ index 2533039..fca6b1b 100644
  
          let mut node = match LogosNodeCtx::new(&config_json) {
              Ok(n) => n,
-@@ -305,12 +478,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -305,12 +533,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
          // yet in the subscriber list.
          subscribers.lock().unwrap().push(inbound_tx);
  
@@ -2937,7 +2963,7 @@ index 2533039..fca6b1b 100644
                  return;
              };
              let mut guard = match subs_for_cb.lock() {
-@@ -332,7 +532,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -332,7 +587,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -2951,7 +2977,7 @@ index 2533039..fca6b1b 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -344,22 +549,246 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -344,22 +604,246 @@ impl<T> ThreadedDeliveryWrapper<T> {
  
          let _ = ready_tx.send(Ok(()));
  
@@ -2984,7 +3010,7 @@ index 2533039..fca6b1b 100644
 +            let catch_up_topic = match &cmd.op {
 +                NodeOp::Subscribe(t) if !caught_up.contains(t) => Some(t.clone()),
 +                _ => None,
-             };
++            };
 +            let result = if use_channels {
 +                // ── SDS reliable-channel path (channelId == content_topic) ──
 +                //
@@ -3071,7 +3097,7 @@ index 2533039..fca6b1b 100644
 +                        }
 +                    }
 +                }
-+            };
+             };
 +            // Ack the caller BEFORE catch-up so the subscribe returns promptly;
 +            // the catch-up then runs (serially) on this node thread.
 +            let ok = result.is_ok();

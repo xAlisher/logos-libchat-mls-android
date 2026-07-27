@@ -366,6 +366,29 @@ pub unsafe extern "C" fn logoschat_leave_group(h: *mut c_void, convo_id: *const 
     }
 }
 
+/// #237: pause (`active == 0`) or resume (`active != 0`) the embedded node's Waku
+/// delivery (filter/lightpush + subscriptions) WITHOUT tearing the node down. The
+/// MLS engine stays alive, so `logoschat_encrypt_for_convo` /
+/// `logoschat_ingest_ciphertext` keep working over BLE while Logos is "off".
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `h` must be a valid handle from `logoschat_open`/`logoschat_open_persistent`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_set_delivery_active(h: *mut c_void, active: c_int) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    match h.client.set_delivery_active(active != 0) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("set_delivery_active failed: {e}"));
+            -1
+        }
+    }
+}
+
 /// List conversation ids as a JSON array string, e.g. `["id1","id2"]`. Caller frees.
 ///
 /// # Safety

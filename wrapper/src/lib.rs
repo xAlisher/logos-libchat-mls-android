@@ -514,6 +514,83 @@ pub unsafe extern "C" fn logoschat_send_message(
     }
 }
 
+/// #235: encrypt `content` for `convo_id` and return the outbound envelope
+/// WITHOUT publishing, so the caller can carry it over a non-node transport
+/// (e.g. BLE). Returns a JSON C string `{"deliveryAddress":"<hex>","dataB64":
+/// "<base64 wire bytes>"}` (caller frees with `logoschat_free_string`), or null
+/// on error (see `logoschat_last_error`). Advances forward-secrecy state ONCE —
+/// send the returned bytes; do NOT also `logoschat_send_message` the same content.
+/// Only 1:1 / GroupV1 conversations are supported.
+///
+/// # Safety
+/// `h` a valid handle; `convo_id` a valid C string; `content` points to `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_encrypt_for_convo(
+    h: *mut c_void,
+    convo_id: *const c_char,
+    content: *const u8,
+    len: usize,
+) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    let Some(convo) = cstr(convo_id) else {
+        set_last_error("convo_id null or not UTF-8");
+        return ptr::null_mut();
+    };
+    let bytes = if content.is_null() || len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(content, len) }
+    };
+    match h.client.encrypt_for_convo(convo, bytes) {
+        Ok(env) => {
+            use base64::Engine;
+            let data_b64 = base64::engine::general_purpose::STANDARD.encode(&env.data);
+            to_c_string(format!(
+                r#"{{"deliveryAddress":{},"dataB64":{}}}"#,
+                json_str(&env.delivery_address),
+                json_str(&data_b64),
+            ))
+        }
+        Err(e) => {
+            set_last_error(format!("encrypt_for_convo failed: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// #235: hand raw inbound ciphertext (arriving over a non-node transport, e.g.
+/// BLE) to the client; it is decoded, decrypted, de-duped and drives the same
+/// events as a node message. Non-blocking. Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `h` a valid handle; `data` points to `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_ingest_ciphertext(
+    h: *mut c_void,
+    data: *const u8,
+    len: usize,
+) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    if data.is_null() || len == 0 {
+        set_last_error("ingest_ciphertext: empty data");
+        return -1;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
+    match h.client.ingest_ciphertext(bytes) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("ingest_ciphertext failed: {e}"));
+            -1
+        }
+    }
+}
+
 fn event_json(ev: &Event) -> (c_int, String) {
     match ev {
         Event::ConversationStarted { convo_id, class } => (

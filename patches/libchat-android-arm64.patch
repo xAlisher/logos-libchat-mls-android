@@ -1766,10 +1766,10 @@ index 18877e7..afca93e 100644
          }
      }
 diff --git a/core/conversations/src/service_traits.rs b/core/conversations/src/service_traits.rs
-index dac2516..7043542 100644
+index dac2516..56fcc21 100644
 --- a/core/conversations/src/service_traits.rs
 +++ b/core/conversations/src/service_traits.rs
-@@ -17,6 +17,13 @@ pub trait DeliveryService: Debug {
+@@ -17,6 +17,20 @@ pub trait DeliveryService: Debug {
      type Error: Display + Debug;
      fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error>;
      fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error>;
@@ -1779,6 +1779,13 @@ index dac2516..7043542 100644
 +    /// (e.g. the in-process test transport).
 +    fn set_active(&mut self, _active: bool) -> Result<(), Self::Error> {
 +        Ok(())
++    }
++    /// #239: drain envelopes that were buffered instead of published (delivery
++    /// paused) — lets the caller recover e.g. an offline group-create welcome to
++    /// carry it over BLE. Each item is `(delivery_address, wire_bytes)`. Default:
++    /// nothing buffered.
++    fn take_pending_outbound(&mut self) -> Vec<(String, Vec<u8>)> {
++        Vec::new()
 +    }
  }
  
@@ -2000,7 +2007,7 @@ index d05b05a..0f74993 100644
 +{
 +}
 diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
-index a684ecd..f8fbedc 100644
+index a684ecd..c85d596 100644
 --- a/crates/generic-chat/src/client.rs
 +++ b/crates/generic-chat/src/client.rs
 @@ -6,8 +6,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
@@ -2073,7 +2080,7 @@ index a684ecd..f8fbedc 100644
              },
              event_rx,
          )
-@@ -169,6 +188,18 @@ where
+@@ -169,6 +188,32 @@ where
          self.core.lock().installation_name().to_string()
      }
  
@@ -2089,10 +2096,24 @@ index a684ecd..f8fbedc 100644
 +            .map_err(|e| ClientError::Transport(e.to_string()))
 +    }
 +
++    /// #239: access the registration/directory service (e.g. to export our own
++    /// contact card or seed a peer's, for a BLE-only conversation bootstrap).
++    pub fn directory(&self) -> &R {
++        &self.directory
++    }
++
++    /// #239: drain outbound envelopes the delivery buffered while paused — used to
++    /// recover the welcome produced by an offline `create_direct_conversation` so
++    /// it can be carried to the new peer over BLE. Each item is
++    /// `(delivery_address, wire_bytes)`.
++    pub fn take_pending_outbound(&mut self) -> Vec<(String, Vec<u8>)> {
++        self.core.lock().ds().take_pending_outbound()
++    }
++
      // Creates a conversation between two Accounts.
      pub fn create_direct_conversation(
          &mut self,
-@@ -222,6 +253,20 @@ where
+@@ -222,6 +267,20 @@ where
              .map_err(Into::into)
      }
  
@@ -2113,7 +2134,7 @@ index a684ecd..f8fbedc 100644
      /// The group's roster, one [`GroupMember`] per account (self included). An
      /// account's several devices collapse to a single entry surfacing that
      /// account; a member whose account claim the directory can't confirm stays
-@@ -246,6 +291,15 @@ where
+@@ -246,6 +305,15 @@ where
              .map_err(Into::into)
      }
  
@@ -2129,7 +2150,7 @@ index a684ecd..f8fbedc 100644
      /// List all conversation IDs known to this client.
      pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
          self.core.lock().list_conversations().map_err(Into::into)
-@@ -260,6 +314,31 @@ where
+@@ -260,6 +328,31 @@ where
              .map_err(Into::into)
      }
  
@@ -2161,7 +2182,7 @@ index a684ecd..f8fbedc 100644
      /// Resolve an account address to the signer (device) ids its published
      /// directory bundle endorses. A reachable account has published at least
      /// one signer; anything else is an error.
-@@ -310,6 +389,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -310,6 +403,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      core: Arc<Mutex<ClientCore<T, R, S>>>,
      directory: R,
      inbound: Receiver<Vec<u8>>,
@@ -2169,7 +2190,7 @@ index a684ecd..f8fbedc 100644
      wakeup_events: Receiver<WakeupEvent>,
      shutdown: Receiver<()>,
      event_tx: Sender<Event>,
-@@ -317,28 +397,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -317,28 +411,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      T: DeliveryService + Send + 'static,
      R: RegistrationService + AccountDirectory + Send + 'static,
  {
@@ -2253,10 +2274,75 @@ index a8ea88c..45408fa 100644
          &self.verifying_key
      }
 diff --git a/crates/generic-chat/tests/saro_and_raya.rs b/crates/generic-chat/tests/saro_and_raya.rs
-index 01b954f..2080008 100644
+index 01b954f..994f015 100644
 --- a/crates/generic-chat/tests/saro_and_raya.rs
 +++ b/crates/generic-chat/tests/saro_and_raya.rs
-@@ -411,3 +411,42 @@ fn unpublished_account_address_is_an_error() {
+@@ -54,6 +54,64 @@ where
+     f(event).unwrap_or_else(|other| panic!("expected {label}, got {other:?}"))
+ }
+ 
++/// #239: Alice and Bob have never met online — SEPARATE registries. Alice can only
++/// add Bob after IMPORTING his contact card (the hand-off that will travel over
++/// BLE). Then the MLS 1:1 create -> welcome -> join -> message all work with no
++/// shared directory lookup, proving the offline-bootstrap primitives.
++#[test]
++fn offline_bootstrap_via_imported_contact() {
++    let bus = MessageBus::default();
++    let alice_reg = EphemeralRegistry::new();
++    let bob_reg = EphemeralRegistry::new();
++
++    let (raya, raya_events) =
++        create_test_client(bus.clone(), bob_reg.clone()).expect("bob client");
++    let (mut saro, _saro_events) =
++        create_test_client(bus.clone(), alice_reg.clone()).expect("alice client");
++    let bob_addr = raya.addr().to_string();
++
++    // Alice's registry has never seen Bob -> a create must fail.
++    assert!(
++        saro.create_direct_conversation(&bob_addr).is_err(),
++        "create should fail before Bob's card is imported"
++    );
++
++    // The BLE hand-off is MUTUAL: each side imports the other's card — Alice needs
++    // Bob's to create the group, and Bob needs Alice's to verify her as the sender
++    // of messages that follow.
++    let (b_acct, b_dev, b_kp, b_bp, b_sig) = bob_reg.export_contact().expect("bob exports a card");
++    assert_eq!(b_acct, bob_addr, "card account matches Bob's address");
++    alice_reg
++        .import_contact(&b_acct, &b_dev, b_kp, b_bp, b_sig)
++        .expect("alice imports bob's verified card");
++    let (a_acct, a_dev, a_kp, a_bp, a_sig) = alice_reg.export_contact().expect("alice exports a card");
++    bob_reg
++        .import_contact(&a_acct, &a_dev, a_kp, a_bp, a_sig)
++        .expect("bob imports alice's verified card");
++
++    // Now the offline create succeeds using ONLY the imported data.
++    let convo_id = saro
++        .create_direct_conversation(&bob_addr)
++        .expect("offline create after import");
++
++    // Bob joins from the welcome (delivered here over the shared bus — the stand-in
++    // for the BLE flood the app performs).
++    expect_event(&raya_events, "ConversationStarted", |e| match e {
++        Event::ConversationStarted { convo_id, .. } => Ok(convo_id),
++        other => Err(other),
++    });
++
++    // A message round-trips A -> B over the freshly bootstrapped conversation.
++    saro.send_message(&convo_id, b"offline-hello").expect("send");
++    expect_event(&raya_events, "MessageReceived", |e| match e {
++        Event::MessageReceived { content, .. } => {
++            assert_eq!(content.as_slice(), b"offline-hello");
++            Ok(())
++        }
++        other => Err(other),
++    });
++}
++
+ #[test]
+ fn direct_v1_integration() {
+     let bus = MessageBus::default();
+@@ -411,3 +469,42 @@ fn unpublished_account_address_is_an_error() {
          logos_generic_chat::ClientError::AccountResolution(_)
      ));
  }
@@ -2395,6 +2481,274 @@ index a5d87ca..f5c6915 100644
  /// The Logos client: a [`ChatClient`] wired to the Logos service stack — a
  /// [`DelegateSigner`] identity acting for a fresh dev account, the HTTP
  /// keypackage + account registry ([`HttpRegistry`], which is both the
+diff --git a/extensions/components/src/contact_registry/ephemeral.rs b/extensions/components/src/contact_registry/ephemeral.rs
+index f240ae2..b937b51 100644
+--- a/extensions/components/src/contact_registry/ephemeral.rs
++++ b/extensions/components/src/contact_registry/ephemeral.rs
+@@ -4,7 +4,7 @@ use std::{
+     sync::{Arc, Mutex},
+ };
+ 
+-use crypto::Ed25519VerifyingKey;
++use crypto::{Ed25519Signature, Ed25519VerifyingKey};
+ use libchat::{IdentityProvider, RegistrationService};
+ use logos_account::{AccountDirectory, DeviceSet, SignedDeviceBundle, verify_bundle};
+ 
+@@ -19,12 +19,66 @@ use logos_account::{AccountDirectory, DeviceSet, SignedDeviceBundle, verify_bund
+ pub struct EphemeralRegistry {
+     key_packages: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+     installations: Arc<Mutex<HashMap<String, SignedDeviceBundle>>>,
++    // #239: same offline-bootstrap surface as HttpRegistry, so the contact-export
++    // /import path is exercised headlessly (no node, no HTTP).
++    my_key_package: Arc<Mutex<Option<(String, Vec<u8>)>>>,
++    my_bundle: Arc<Mutex<Option<SignedDeviceBundle>>>,
+ }
+ 
+ impl EphemeralRegistry {
+     pub fn new() -> Self {
+         Self::default()
+     }
++
++    /// #239: our contact card `(account, device, key_package, bundle_payload,
++    /// bundle_sig)` for a peer to add us offline.
++    pub fn export_contact(&self) -> Option<(String, String, Vec<u8>, Vec<u8>, Vec<u8>)> {
++        let (device_id, kp) = self.my_key_package.lock().unwrap().clone()?;
++        let bundle = self.my_bundle.lock().unwrap().clone()?;
++        Some((
++            hex::encode(bundle.account_pub.as_ref()),
++            device_id,
++            kp,
++            bundle.payload.clone(),
++            bundle.signature.as_ref().to_vec(),
++        ))
++    }
++
++    /// #239: verify + seed a peer's card so an offline create can add them.
++    pub fn import_contact(
++        &self,
++        account_hex: &str,
++        device_id: &str,
++        key_package: Vec<u8>,
++        bundle_payload: Vec<u8>,
++        bundle_sig: Vec<u8>,
++    ) -> Result<(), String> {
++        let account_bytes: [u8; 32] = hex::decode(account_hex)
++            .map_err(|e| e.to_string())?
++            .try_into()
++            .map_err(|_| "account not 32 bytes".to_string())?;
++        let account_pub =
++            Ed25519VerifyingKey::from_bytes(&account_bytes).map_err(|_| "bad account key".to_string())?;
++        let sig_arr: [u8; 64] = bundle_sig
++            .try_into()
++            .map_err(|_| "bundle signature not 64 bytes".to_string())?;
++        let bundle = SignedDeviceBundle {
++            account_pub,
++            payload: bundle_payload,
++            signature: Ed25519Signature::from(sig_arr),
++        };
++        // verifies the bundle binds account -> devices, exactly like a fetch would.
++        verify_bundle(&bundle.account_pub, &bundle).map_err(|e| e.to_string())?;
++        self.key_packages
++            .lock()
++            .unwrap()
++            .insert(device_id.to_string(), key_package);
++        self.installations
++            .lock()
++            .unwrap()
++            .insert(account_hex.to_lowercase(), bundle);
++        Ok(())
++    }
+ }
+ 
+ impl Debug for EphemeralRegistry {
+@@ -61,10 +115,9 @@ impl RegistrationService for EphemeralRegistry {
+     ) -> Result<(), <Self as RegistrationService>::Error> {
+         // Keyed by device id — the hex of the signer's verifying key — exactly
+         // like the HTTP registry, so tests exercise the deployed keying.
+-        self.key_packages
+-            .lock()
+-            .unwrap()
+-            .insert(hex::encode(identity.public_key().as_ref()), key_bundle);
++        let device_id = hex::encode(identity.public_key().as_ref());
++        *self.my_key_package.lock().unwrap() = Some((device_id.clone(), key_bundle.clone())); // #239
++        self.key_packages.lock().unwrap().insert(device_id, key_bundle);
+         Ok(())
+     }
+ 
+@@ -85,6 +138,7 @@ impl AccountDirectory for EphemeralRegistry {
+         &mut self,
+         bundle: &SignedDeviceBundle,
+     ) -> Result<(), <Self as AccountDirectory>::Error> {
++        *self.my_bundle.lock().unwrap() = Some(bundle.clone()); // #239
+         self.installations
+             .lock()
+             .unwrap()
+diff --git a/extensions/components/src/contact_registry/http.rs b/extensions/components/src/contact_registry/http.rs
+index 0cf5987..9725aaa 100644
+--- a/extensions/components/src/contact_registry/http.rs
++++ b/extensions/components/src/contact_registry/http.rs
+@@ -1,4 +1,6 @@
++use std::collections::HashMap;
+ use std::fmt::Debug;
++use std::sync::{Arc, Mutex};
+ use std::time::{Duration, SystemTime, UNIX_EPOCH};
+ 
+ use base64::Engine;
+@@ -23,6 +25,19 @@ use serde::{Deserialize, Serialize};
+ pub struct HttpRegistry {
+     base_url: String,
+     http: reqwest::blocking::Client,
++    /// #239: locally-seeded key packages (device_id hex -> key package bytes) and
++    /// account device-sets (account_pub hex -> DeviceSet), consulted by
++    /// `retrieve`/`fetch` BEFORE the network. This is how a contact learned purely
++    /// over BLE (never in the HTTP registry) can still be added to an MLS group
++    /// while fully offline. Shared across clones (Core + the client hold clones).
++    local_keypackages: Arc<Mutex<HashMap<String, Vec<u8>>>>,
++    local_accounts: Arc<Mutex<HashMap<String, DeviceSet>>>,
++    /// #239: our OWN (device_id hex, key package bytes) captured as `register`
++    /// runs — even when the network publish fails (offline), so we can hand our
++    /// contact card to a peer over BLE.
++    my_key_package: Arc<Mutex<Option<(String, Vec<u8>)>>>,
++    /// #239: our OWN signed device bundle captured as `publish` runs.
++    my_bundle: Arc<Mutex<Option<SignedDeviceBundle>>>,
+ }
+ 
+ #[derive(Debug, thiserror::Error)]
+@@ -88,8 +103,89 @@ impl HttpRegistry {
+         Self {
+             base_url: base_url.into().trim_end_matches('/').to_string(),
+             http,
++            local_keypackages: Arc::new(Mutex::new(HashMap::new())),
++            local_accounts: Arc::new(Mutex::new(HashMap::new())),
++            my_key_package: Arc::new(Mutex::new(None)),
++            my_bundle: Arc::new(Mutex::new(None)),
+         }
+     }
++
++    /// #239: our own captured key package (device_id hex, bytes), if `register`
++    /// has run this session.
++    pub fn my_key_package(&self) -> Option<(String, Vec<u8>)> {
++        self.my_key_package.lock().unwrap().clone()
++    }
++
++    /// #239: our own captured signed device bundle, if `publish` has run.
++    pub fn my_bundle(&self) -> Option<SignedDeviceBundle> {
++        self.my_bundle.lock().unwrap().clone()
++    }
++
++    /// #239: our contact card for a peer to add us offline over BLE. Returns
++    /// `(account_hex, device_id_hex, key_package_bytes, bundle_payload, bundle_sig)`
++    /// or `None` if register/publish haven't run this session.
++    pub fn export_contact(&self) -> Option<(String, String, Vec<u8>, Vec<u8>, Vec<u8>)> {
++        let (device_id, kp) = self.my_key_package.lock().unwrap().clone()?;
++        let bundle = self.my_bundle.lock().unwrap().clone()?;
++        let account_hex = hex::encode(bundle.account_pub.as_ref());
++        Some((
++            account_hex,
++            device_id,
++            kp,
++            bundle.payload.clone(),
++            bundle.signature.as_ref().to_vec(),
++        ))
++    }
++
++    /// #239: verify + seed a peer's contact card so an offline group create can add
++    /// them. The bundle is verified under `account_hex` (binds account -> devices),
++    /// exactly as a directory fetch would be.
++    pub fn import_contact(
++        &self,
++        account_hex: &str,
++        device_id: &str,
++        key_package: Vec<u8>,
++        bundle_payload: Vec<u8>,
++        bundle_sig: Vec<u8>,
++    ) -> Result<(), String> {
++        let account_bytes: [u8; 32] = hex::decode(account_hex)
++            .map_err(|e| e.to_string())?
++            .try_into()
++            .map_err(|_| "account not 32 bytes".to_string())?;
++        let account_pub =
++            Ed25519VerifyingKey::from_bytes(&account_bytes).map_err(|_| "bad account key".to_string())?;
++        let sig_arr: [u8; 64] = bundle_sig
++            .try_into()
++            .map_err(|_| "bundle signature not 64 bytes".to_string())?;
++        let bundle = SignedDeviceBundle {
++            account_pub,
++            payload: bundle_payload,
++            signature: Ed25519Signature::from(sig_arr),
++        };
++        let set = verify_bundle(&bundle.account_pub, &bundle).map_err(|e| e.to_string())?;
++        self.inject_account(account_hex, set);
++        self.inject_key_package(device_id, key_package);
++        Ok(())
++    }
++
++    /// #239: seed a peer's key package locally (device_id hex -> raw key package
++    /// bytes, the same wire form `retrieve` returns) so an offline group create can
++    /// find it without the HTTP registry.
++    pub fn inject_key_package(&self, device_id: &str, key_package: Vec<u8>) {
++        self.local_keypackages
++            .lock()
++            .unwrap()
++            .insert(device_id.to_string(), key_package);
++    }
++
++    /// #239: seed a peer's verified account device-set locally (account_pub hex ->
++    /// DeviceSet) so `resolve_device_ids` answers offline.
++    pub fn inject_account(&self, account_pub_hex: &str, set: DeviceSet) {
++        self.local_accounts
++            .lock()
++            .unwrap()
++            .insert(account_pub_hex.to_lowercase(), set);
++    }
+ }
+ 
+ impl Debug for HttpRegistry {
+@@ -109,6 +205,10 @@ impl RegistrationService for HttpRegistry {
+         key_bundle: Vec<u8>,
+     ) -> Result<(), HttpRegistryError> {
+         let device_id = hex::encode(identity.public_key().as_ref());
++        // #239: capture our key package for BLE contact export BEFORE the network
++        // publish (which fails offline). The raw `key_bundle` is exactly what
++        // `retrieve` returns and what a peer's `key_package_for_signer` consumes.
++        *self.my_key_package.lock().unwrap() = Some((device_id.clone(), key_bundle.clone()));
+         let timestamp_ms = SystemTime::now()
+             .duration_since(UNIX_EPOCH)
+             .map_err(|_| HttpRegistryError::Clock)?
+@@ -135,6 +235,11 @@ impl RegistrationService for HttpRegistry {
+     }
+ 
+     fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, HttpRegistryError> {
++        // #239: a BLE-seeded key package wins — it lets an offline create succeed
++        // without the registry (and the peer may never be in the registry at all).
++        if let Some(kp) = self.local_keypackages.lock().unwrap().get(device_id) {
++            return Ok(Some(kp.clone()));
++        }
+         let url = format!("{}/v0/keypackage/{}", self.base_url, device_id);
+         let resp = send_retrying(|| self.http.get(&url))?;
+         if resp.status().as_u16() == 404 {
+@@ -181,6 +286,9 @@ impl AccountDirectory for HttpRegistry {
+     type Error = HttpRegistryError;
+ 
+     fn publish(&mut self, bundle: &SignedDeviceBundle) -> Result<(), Self::Error> {
++        // #239: capture our own bundle for BLE contact export, before the network
++        // publish (fails offline). Peers verify it to learn our account -> devices.
++        *self.my_bundle.lock().unwrap() = Some(bundle.clone());
+         let req = SubmitAccountRequest {
+             account_pub: hex::encode(bundle.account_pub.as_ref()),
+             payload: BASE64.encode(&bundle.payload),
+@@ -198,6 +306,11 @@ impl AccountDirectory for HttpRegistry {
+     }
+ 
+     fn fetch(&self, account: &Ed25519VerifyingKey) -> Result<Option<DeviceSet>, Self::Error> {
++        // #239: a BLE-seeded device-set wins, so `resolve_device_ids` works offline.
++        let account_hex = hex::encode(account.as_ref());
++        if let Some(set) = self.local_accounts.lock().unwrap().get(&account_hex) {
++            return Ok(Some(set.clone()));
++        }
+         let url = format!(
+             "{}/v0/account/{}",
+             self.base_url,
 diff --git a/extensions/components/src/storage/in_memory_store.rs b/extensions/components/src/storage/in_memory_store.rs
 index 2bf84f9..009d6ea 100644
 --- a/extensions/components/src/storage/in_memory_store.rs
@@ -2437,10 +2791,10 @@ index 2bf84f9..009d6ea 100644
      fn default() -> Self {
          Self::new()
 diff --git a/extensions/embedded-logos-delivery/src/lib.rs b/extensions/embedded-logos-delivery/src/lib.rs
-index a9c83cb..ca24901 100644
+index a9c83cb..030d855 100644
 --- a/extensions/embedded-logos-delivery/src/lib.rs
 +++ b/extensions/embedded-logos-delivery/src/lib.rs
-@@ -87,6 +87,12 @@ impl DeliveryService for EmbeddedLogosDelivery {
+@@ -87,6 +87,18 @@ impl DeliveryService for EmbeddedLogosDelivery {
      ) -> Result<(), <Self as DeliveryService>::Error> {
          self.inner.subscribe(&content_topic_for(delivery_address))
      }
@@ -2449,6 +2803,12 @@ index a9c83cb..ca24901 100644
 +    /// subscriptions) while keeping the node — and the MLS engine — alive.
 +    fn set_active(&mut self, active: bool) -> Result<(), DeliveryError> {
 +        self.inner.set_active(active)
++    }
++
++    /// #239: drain envelopes buffered while paused (e.g. an offline create's
++    /// welcome), to carry over BLE. `(delivery_address_or_topic, wire_bytes)`.
++    fn take_pending_outbound(&mut self) -> Vec<(String, Vec<u8>)> {
++        self.inner.take_pending()
 +    }
  }
  
@@ -2539,7 +2899,7 @@ index 2036116..6c38816 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..93b2429 100644
+index 2533039..386184f 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -1,3 +1,5 @@
@@ -2691,7 +3051,7 @@ index 2533039..93b2429 100644
  // ── ThreadedDeliveryWrapper ─────────────────────────────────────────────────
  
  /// Owns the embedded node on a dedicated thread. Generic over the inbound item
-@@ -147,6 +238,14 @@ pub struct ThreadedDeliveryWrapper<T = WakuEvent> {
+@@ -147,6 +238,18 @@ pub struct ThreadedDeliveryWrapper<T = WakuEvent> {
      #[allow(dead_code)]
      subscribers: SubscriberList<T>,
      inbound_rx: Option<Receiver<T>>,
@@ -2703,28 +3063,34 @@ index 2533039..93b2429 100644
 +    /// #237: every content topic the client asked to subscribe to. Kept so a
 +    /// pause can unsubscribe them all and a resume can re-subscribe them.
 +    topics: Arc<Mutex<HashSet<String>>>,
++    /// #239: envelopes published while paused are buffered here (content_topic,
++    /// payload) instead of dropped, so an offline group-create's welcome can be
++    /// drained and carried to the new peer over BLE. Drained by `take_pending`.
++    pending: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
  }
  
  // Manual impls so `T` carries no `Clone`/`Debug` bound at the struct level —
-@@ -157,6 +256,8 @@ impl<T> Clone for ThreadedDeliveryWrapper<T> {
+@@ -157,6 +260,9 @@ impl<T> Clone for ThreadedDeliveryWrapper<T> {
              outbound: self.outbound.clone(),
              subscribers: self.subscribers.clone(),
              inbound_rx: self.inbound_rx.clone(),
 +            active: self.active.clone(),
 +            topics: self.topics.clone(),
++            pending: self.pending.clone(),
          }
      }
  }
-@@ -220,6 +321,8 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -220,6 +326,9 @@ impl<T> ThreadedDeliveryWrapper<T> {
              outbound: out_tx,
              subscribers,
              inbound_rx: Some(inbound_rx),
 +            active: Arc::new(AtomicBool::new(true)),
 +            topics: Arc::new(Mutex::new(HashSet::new())),
++            pending: Arc::new(Mutex::new(Vec::new())),
          })
      }
  
-@@ -236,30 +339,65 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -236,30 +345,76 @@ impl<T> ThreadedDeliveryWrapper<T> {
      }
  
      /// Start delivering messages on `content_topic`. Blocks until acknowledged.
@@ -2758,7 +3124,13 @@ index 2533039..93b2429 100644
      pub fn publish(&self, content_topic: &str, payload: &[u8]) -> Result<(), DeliveryError> {
 -        let msg = WakuMessage {
 +        if !self.active.load(Ordering::Relaxed) {
-+            debug!(content_topic, "Publish suppressed (delivery paused)");
++            // #239: buffer instead of dropping, so an offline create's welcome can
++            // be drained and sent over BLE.
++            debug!(content_topic, "Publish buffered (delivery paused)");
++            self.pending
++                .lock()
++                .unwrap()
++                .push((content_topic.to_string(), payload.to_vec()));
 +            return Ok(());
 +        }
 +        debug!(content_topic, payload_len = payload.len(), "Publish");
@@ -2767,10 +3139,14 @@ index 2533039..93b2429 100644
 -            payload: BASE64.encode(payload),
 -            ephemeral: false,
 -        };
--
--        debug!(content_topic = ?msg.content_topic, payload = ?msg.payload, ephemeral = ?msg.ephemeral, "Publish");
 +            payload: payload.to_vec(),
 +        })
++    }
+ 
+-        debug!(content_topic = ?msg.content_topic, payload = ?msg.payload, ephemeral = ?msg.ephemeral, "Publish");
++    /// #239: drain envelopes buffered while paused (content_topic, payload).
++    pub fn take_pending(&self) -> Vec<(String, Vec<u8>)> {
++        std::mem::take(&mut *self.pending.lock().unwrap())
 +    }
  
 -        let message_json =
@@ -2800,7 +3176,7 @@ index 2533039..93b2429 100644
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -275,22 +413,112 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -275,22 +430,112 @@ impl<T> ThreadedDeliveryWrapper<T> {
          subscribers: SubscriberList<T>,
          inbound_tx: Sender<T>,
          ready_tx: mpsc::Sender<Result<(), DeliveryError>>,
@@ -2922,7 +3298,7 @@ index 2533039..93b2429 100644
  
          let mut node = match LogosNodeCtx::new(&config_json) {
              Ok(n) => n,
-@@ -305,12 +533,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -305,12 +550,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
          // yet in the subscriber list.
          subscribers.lock().unwrap().push(inbound_tx);
  
@@ -2963,7 +3339,7 @@ index 2533039..93b2429 100644
                  return;
              };
              let mut guard = match subs_for_cb.lock() {
-@@ -332,7 +587,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -332,7 +604,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -2977,7 +3353,7 @@ index 2533039..93b2429 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -344,22 +604,246 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -344,22 +621,246 @@ impl<T> ThreadedDeliveryWrapper<T> {
  
          let _ = ready_tx.send(Ok(()));
  

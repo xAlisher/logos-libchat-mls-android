@@ -47,6 +47,43 @@ typedef void (*free_fn)(char *);
 typedef void (*shutdown_fn)(void *);
 typedef void (*event_cb)(int, const char *, void *);
 typedef int (*set_event_cb_fn)(void *, event_cb, void *);
+// #239 offline-bootstrap verbs
+typedef int (*set_active_fn)(void *, int);
+typedef char *(*export_fn)(void *);
+typedef int (*import_fn)(void *, const char *);
+typedef char *(*newoffline_fn)(void *, const char *);
+typedef int (*ingest_fn)(void *, const unsigned char *, size_t);
+typedef char *(*encrypt_fn)(void *, const char *, const unsigned char *, size_t);
+
+// Minimal base64 decoder (for feeding a welcome/ciphertext to `ingest`).
+static int b64val(int c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+static size_t b64decode(const char *in, unsigned char *out, size_t outmax) {
+  size_t o = 0; int q[4]; int n = 0;
+  for (const char *p = in; *p; p++) {
+    int v = b64val((unsigned char)*p);
+    if (v < 0) continue;
+    q[n++] = v;
+    if (n == 4) {
+      if (o + 3 > outmax) break;
+      out[o++] = (q[0] << 2) | (q[1] >> 4);
+      out[o++] = ((q[1] & 15) << 4) | (q[2] >> 2);
+      out[o++] = ((q[2] & 3) << 6) | q[3];
+      n = 0;
+    }
+  }
+  if (n >= 2 && o < outmax) {
+    out[o++] = (q[0] << 2) | (q[1] >> 4);
+    if (n >= 3 && o < outmax) out[o++] = ((q[1] & 15) << 4) | (q[2] >> 2);
+  }
+  return o;
+}
 
 static void ts(char *buf, size_t n) {
   struct timeval tv;
@@ -104,6 +141,12 @@ int main(int argc, char **argv) {
   list_fn f_list = (list_fn)dlsym(h, "logoschat_list_conversations");
   set_event_cb_fn f_setev = (set_event_cb_fn)dlsym(h, "logoschat_set_event_callback");
   shutdown_fn f_shutdown = (shutdown_fn)dlsym(h, "logoschat_shutdown");
+  set_active_fn f_setactive = (set_active_fn)dlsym(h, "logoschat_set_delivery_active");
+  export_fn f_export = (export_fn)dlsym(h, "logoschat_export_contact");
+  import_fn f_import = (import_fn)dlsym(h, "logoschat_import_contact");
+  newoffline_fn f_newoffline = (newoffline_fn)dlsym(h, "logoschat_create_conversation_offline");
+  ingest_fn f_ingest = (ingest_fn)dlsym(h, "logoschat_ingest_ciphertext");
+  encrypt_fn f_encrypt = (encrypt_fn)dlsym(h, "logoschat_encrypt_for_convo");
   xfree = (free_fn)dlsym(h, "logoschat_free_string");
   xerr = (err_fn)dlsym(h, "logoschat_last_error");
   if (!f_open || !f_addr || !f_newconvo || !f_newgroup || !f_addmember || !f_send ||
@@ -197,6 +240,43 @@ int main(int argc, char **argv) {
       char *text = sp + 1;
       int rc = f_send(H, cid, (const unsigned char *)text, strlen(text));
       printf("SEND rc=%d%s\n", rc, rc != 0 && xerr ? xerr() : "");
+
+    } else if (strcmp(line, "pause") == 0) {
+      int rc = f_setactive ? f_setactive(H, 0) : -99;
+      printf("PAUSE rc=%d\n", rc);
+
+    } else if (strcmp(line, "resume") == 0) {
+      int rc = f_setactive ? f_setactive(H, 1) : -99;
+      printf("RESUME rc=%d\n", rc);
+
+    } else if (strcmp(line, "export") == 0) {
+      char *c = f_export ? f_export(H) : NULL;
+      printf("CARD: %s\n", c ? c : (xerr ? xerr() : "(null)"));
+      if (c) xfree(c);
+
+    } else if (strncmp(line, "import ", 7) == 0) {
+      int rc = f_import ? f_import(H, line + 7) : -99;
+      printf("IMPORT rc=%d %s\n", rc, rc != 0 && xerr ? xerr() : "");
+
+    } else if (strncmp(line, "newoffline ", 11) == 0) {
+      char *a = line + 11; char *sp = strchr(a, ' '); if (sp) *sp = 0;
+      char *r = f_newoffline ? f_newoffline(H, a) : NULL;
+      printf("OFFLINE: %s\n", r ? r : (xerr ? xerr() : "(null)"));
+      if (r) xfree(r);
+
+    } else if (strncmp(line, "ingest ", 7) == 0) {
+      static unsigned char buf[262144];
+      size_t n = b64decode(line + 7, buf, sizeof(buf));
+      int rc = f_ingest ? f_ingest(H, buf, n) : -99;
+      printf("INGEST rc=%d len=%zu %s\n", rc, n, rc != 0 && xerr ? xerr() : "");
+
+    } else if (strncmp(line, "encrypt ", 8) == 0) {
+      char *cid = line + 8; char *sp = strchr(cid, ' ');
+      if (!sp) { printf("ERR usage: encrypt <convoId> <text>\n"); continue; }
+      *sp = 0; char *text = sp + 1;
+      char *r = f_encrypt ? f_encrypt(H, cid, (const unsigned char *)text, strlen(text)) : NULL;
+      printf("ENCRYPT: %s\n", r ? r : (xerr ? xerr() : "(null)"));
+      if (r) xfree(r);
 
     } else {
       printf("ERR unknown command: %s\n", line);

@@ -1179,10 +1179,33 @@ index 8a6cb01..9dd69b2 100644
          &mut self,
          cx: &mut ServiceContext<S>,
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
-index 6d6b64a..c99ebbf 100644
+index 6d6b64a..9f5fc1e 100644
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
-@@ -165,6 +165,23 @@ impl GroupV1Convo {
+@@ -70,13 +70,19 @@ impl GroupV1Convo {
+         cx: &mut ServiceContext<S>,
+         welcome: Welcome,
+     ) -> Result<Self, ChatError> {
++        // NB: a duplicate welcome for a group we already joined makes `.build()`
++        // return `Err(GroupAlreadyExists)`. These MUST propagate as errors (the
++        // inbound pipeline + JS treat "already exists" as a benign no-op) — an
++        // `.unwrap()` here panics on a worker thread and SIGSEGVs the whole
++        // process. This fires routinely via the store catch-up replaying an old
++        // welcome into a phone that already holds the group.
+         let mls_group =
+             StagedWelcome::build_from_welcome(&cx.mls_provider, &Self::mls_join_config(), welcome)
+-                .unwrap()
++                .map_err(ChatError::generic)?
+                 .build()
+-                .unwrap()
++                .map_err(ChatError::generic)?
+                 .into_group(&cx.mls_provider)
+-                .unwrap();
++                .map_err(ChatError::generic)?;
+ 
+         let convo_id = hex::encode(mls_group.group_id().as_slice());
+         Self::subscribe(&mut cx.ds, &convo_id)?;
+@@ -165,6 +171,23 @@ impl GroupV1Convo {
          content: &[u8],
          cx: &mut ServiceContext<S>,
      ) -> Result<(), ChatError> {
@@ -1206,7 +1229,7 @@ index 6d6b64a..c99ebbf 100644
          let sender_id = cx.mls_identity.id().as_str();
          let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
          let wire = reliable.encode_to_vec();
-@@ -172,26 +189,23 @@ impl GroupV1Convo {
+@@ -172,26 +195,23 @@ impl GroupV1Convo {
          let mls_message_out = self
              .mls_group
              .create_message(&cx.mls_provider, &cx.mls_identity, &wire)
@@ -1241,7 +1264,7 @@ index 6d6b64a..c99ebbf 100644
          let aep = AddressedEncryptedPayload {
              delivery_address: self.delivery_address(),
              data: EncryptedPayload {
-@@ -200,9 +214,17 @@ impl GroupV1Convo {
+@@ -200,9 +220,17 @@ impl GroupV1Convo {
                  })),
              },
          };
@@ -1261,7 +1284,7 @@ index 6d6b64a..c99ebbf 100644
          cx.ds
              .publish(env)
              .map_err(|e| ChatError::Delivery(e.to_string()))
-@@ -224,6 +246,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+@@ -224,6 +252,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
          self.send_message(content, cx)
      }
  

@@ -2980,7 +2980,7 @@ index 2036116..6c38816 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..e6c20e9 100644
+index 2533039..5f26923 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -1,3 +1,5 @@
@@ -3434,7 +3434,7 @@ index 2533039..e6c20e9 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -344,22 +621,334 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -344,22 +621,365 @@ impl<T> ThreadedDeliveryWrapper<T> {
  
          let _ = ready_tx.send(Ok(()));
  
@@ -3482,6 +3482,13 @@ index 2533039..e6c20e9 100644
 +        // topic, so this empties and the periodic pull stops while "Logos off".
 +        let mut active_topics: std::collections::HashSet<String> =
 +            std::collections::HashSet::new();
++        // #211: content hashes of messages already replayed by a store catch-up
++        // this session. The periodic pull re-queries an overlapping window every
++        // tick, so without this it would re-feed the same (already-decrypted or
++        // own) messages to the lib every ~20s — the benign but noisy "cannot
++        // decrypt own messages" churn. Shared with the detached catch-up threads.
++        let seen_hashes: Arc<Mutex<std::collections::HashSet<u64>>> =
++            Arc::new(Mutex::new(std::collections::HashSet::new()));
 +
 +        loop {
 +            let cmd = match out_rx.recv_timeout(CATCHUP_TICK) {
@@ -3506,9 +3513,10 @@ index 2533039..e6c20e9 100644
 +                        let subscribers = subscribers.clone();
 +                        let map = map.clone();
 +                        let store_peer = store_peer.clone();
++                        let seen = seen_hashes.clone();
 +                        thread::spawn(move || {
 +                            Self::store_catch_up(
-+                                &node, &store_peer, &topic, start_ns, &subscribers, &map,
++                                &node, &store_peer, &topic, start_ns, &subscribers, &map, &seen,
 +                            );
 +                        });
 +                    }
@@ -3642,9 +3650,10 @@ index 2533039..e6c20e9 100644
 +                    let subscribers = subscribers.clone();
 +                    let map = map.clone();
 +                    let store_peer = store_peer.clone();
++                    let seen = seen_hashes.clone();
 +                    thread::spawn(move || {
 +                        Self::store_catch_up(
-+                            &node, &store_peer, &topic, start_ns, &subscribers, &map,
++                            &node, &store_peer, &topic, start_ns, &subscribers, &map, &seen,
 +                        );
 +                    });
 +                }
@@ -3681,10 +3690,12 @@ index 2533039..e6c20e9 100644
 +        start_ns: u64,
 +        subscribers: &SubscriberList<T>,
 +        map: &Arc<Mutex<F>>,
++        seen: &Arc<Mutex<std::collections::HashSet<u64>>>,
 +    ) where
 +        T: Clone,
 +        F: FnMut(WakuEvent) -> Option<T>,
 +    {
++        use std::hash::{Hash, Hasher};
 +        if peer.is_empty() {
 +            return; // preset/fleet mode has no designated store peer
 +        }
@@ -3745,6 +3756,26 @@ index 2533039..e6c20e9 100644
 +            let (Some(ct), Some(payload)) = (m.content_topic, m.payload) else {
 +                continue;
 +            };
++            // #211: skip a message this session's catch-up already replayed, so the
++            // overlapping re-query window doesn't re-feed it to the lib every tick.
++            // Key on (topic, raw payload) — dedup before decode, cheap + exact.
++            let key = {
++                let mut h = std::collections::hash_map::DefaultHasher::new();
++                ct.hash(&mut h);
++                match &payload {
++                    WakuPayload::Base64(s) => s.hash(&mut h),
++                    WakuPayload::Bytes(b) => b.hash(&mut h),
++                }
++                h.finish()
++            };
++            match seen.lock() {
++                Ok(mut g) => {
++                    if !g.insert(key) {
++                        continue; // already replayed this session
++                    }
++                }
++                Err(_) => return,
++            }
 +            // Rebuild a plain message-received event and run it through the SAME
 +            // mapper the live callback uses (content-topic filter + payload
 +            // decode), then fan out to the inbound queue like a live message.

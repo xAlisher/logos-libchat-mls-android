@@ -2974,7 +2974,7 @@ index 2036116..6c38816 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..5f26923 100644
+index 2533039..5267de6 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -1,3 +1,5 @@
@@ -3251,7 +3251,7 @@ index 2533039..5f26923 100644
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -275,22 +430,112 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -275,22 +430,130 @@ impl<T> ThreadedDeliveryWrapper<T> {
          subscribers: SubscriberList<T>,
          inbound_tx: Sender<T>,
          ready_tx: mpsc::Sender<Result<(), DeliveryError>>,
@@ -3336,6 +3336,10 @@ index 2533039..5f26923 100644
 +        // LOGOS_DELIVERY_PRESET_MODE=1) to fall back to the old preset/fleet behaviour.
 +        const DEFAULT_SERVICE_NODE: &str =
 +            "/dns4/msg.logos.live/tcp/30304/p2p/16Uiu2HAmNdX1s7wRhygyWKmYiUst84329TSz3byLEP6FjcoxDbH4";
++        // #221: the SAME node reachable over secure WebSocket (same peerId), for
++        // clients on networks that block the raw libp2p TCP port. Live + valid cert.
++        const DEFAULT_SERVICE_NODE_WSS: &str =
++            "/dns4/msg.logos.live/tcp/8000/wss/p2p/16Uiu2HAmNdX1s7wRhygyWKmYiUst84329TSz3byLEP6FjcoxDbH4";
 +        let service_node = std::env::var("LOGOS_DELIVERY_SERVICE_NODE")
 +            .unwrap_or_else(|_| DEFAULT_SERVICE_NODE.to_string());
 +        // The store peer used for missed-welcome catch-up (#228). Same node we
@@ -3351,6 +3355,19 @@ index 2533039..5f26923 100644
 +                "discv5UdpPort": cfg.port,
 +            })
 +        } else {
++            // #221: reach the SAME node over TCP and — as a fallback for networks
++            // that block the raw libp2p TCP port — WSS. Both multiaddrs carry the
++            // same peerId, so libp2p treats them as one peer and keeps whichever
++            // transport connects. The filter/lightpush/store ANCHOR below stays on
++            // the TCP multiaddr (proven on-device), so a normal network is
++            // unchanged; the WSS addr only adds a reach path. Override the WSS addr
++            // with LOGOS_DELIVERY_SERVICE_NODE_WSS (set it empty to drop it).
++            let service_node_wss = std::env::var("LOGOS_DELIVERY_SERVICE_NODE_WSS")
++                .unwrap_or_else(|_| DEFAULT_SERVICE_NODE_WSS.to_string());
++            let mut static_peers = vec![service_node.clone()];
++            if !service_node_wss.is_empty() {
++                static_peers.push(service_node_wss);
++            }
 +            serde_json::json!({
 +                "logLevel": cfg.log_level,
 +                "mode": mode,
@@ -3358,11 +3375,12 @@ index 2533039..5f26923 100644
 +                "numShardsInNetwork": 8,
 +                "discv5Discovery": false,
 +                "peerExchange": false,
-+                "staticnodes": [service_node],
++                "staticnodes": static_peers,
 +                // Designated service peers — CONFIRMED on-device to route lightpush +
 +                // filter to our node (a lightpush with lightpushnode set reached our
 +                // node's protocol handler; staticnodes alone still load-balanced to
 +                // fleet peers). This is what actually anchors delivery to our node.
++                // Kept on TCP (the proven path); WSS above is only a reach fallback.
 +                "filternode": service_node,
 +                "lightpushnode": service_node,
 +                "tcpPort": cfg.port,
@@ -3373,7 +3391,7 @@ index 2533039..5f26923 100644
  
          let mut node = match LogosNodeCtx::new(&config_json) {
              Ok(n) => n,
-@@ -305,12 +550,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -305,12 +568,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
          // yet in the subscriber list.
          subscribers.lock().unwrap().push(inbound_tx);
  
@@ -3414,7 +3432,7 @@ index 2533039..5f26923 100644
                  return;
              };
              let mut guard = match subs_for_cb.lock() {
-@@ -332,7 +604,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -332,7 +622,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -3428,7 +3446,7 @@ index 2533039..5f26923 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -344,22 +621,365 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -344,22 +639,365 @@ impl<T> ThreadedDeliveryWrapper<T> {
  
          let _ = ready_tx.send(Ok(()));
  
@@ -3517,7 +3535,7 @@ index 2533039..5f26923 100644
 +                    continue;
 +                }
 +                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-             };
++            };
 +            // Track the active-topic set so the periodic pull knows what to refresh.
 +            match &cmd.op {
 +                NodeOp::Subscribe(t) => {
@@ -3630,7 +3648,7 @@ index 2533039..5f26923 100644
 +                        }
 +                    }
 +                }
-+            };
+             };
 +            // Ack the caller BEFORE catch-up so the subscribe returns promptly;
 +            // the catch-up then runs (serially) on this node thread.
 +            let ok = result.is_ok();

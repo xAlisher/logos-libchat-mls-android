@@ -1311,7 +1311,7 @@ index 6d6b64a..cb66db1 100644
          &mut self,
          cx: &mut ServiceContext<S>,
 diff --git a/core/conversations/src/conversation/group_v2.rs b/core/conversations/src/conversation/group_v2.rs
-index c547e5a..eb6d541 100644
+index c547e5a..17aa209 100644
 --- a/core/conversations/src/conversation/group_v2.rs
 +++ b/core/conversations/src/conversation/group_v2.rs
 @@ -14,7 +14,8 @@ use de_mls::protos::de_mls::messages::v1::{
@@ -1345,18 +1345,7 @@ index c547e5a..eb6d541 100644
  /// `app_id` for outbound packets / echo-dedup — random per conversation.
  fn rand_app_id() -> Arc<[u8]> {
      Arc::from(rand_string(5).as_bytes())
-@@ -198,7 +213,9 @@ impl GroupV2Convo {
-         Ok(convo)
-     }
- 
--    fn delivery_address_from_id(convo_id: &str) -> String {
-+    // #211: pub(crate) so `Core::assemble` can re-subscribe every persisted
-+    // conversation on open (derive its topic without loading the MLS group).
-+    pub(crate) fn delivery_address_from_id(convo_id: &str) -> String {
-         let hash = Blake2b::<U6>::new()
-             .chain_update("delivery_addr|")
-             .chain_update(convo_id)
-@@ -376,6 +393,24 @@ where
+@@ -376,6 +391,24 @@ where
          result.and(flushed)
      }
  
@@ -1382,7 +1371,7 @@ index c547e5a..eb6d541 100644
          // Guarantee the local member is listed so callers see the full roster.
          let mut members = self.conversation.members()?;
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
-index 99ad312..22c8a69 100644
+index 99ad312..7b14b9f 100644
 --- a/core/conversations/src/core.rs
 +++ b/core/conversations/src/core.rs
 @@ -11,16 +11,20 @@ use crate::{
@@ -1425,19 +1414,25 @@ index 99ad312..22c8a69 100644
          let causal = CausalHistoryStore::new();
          let pq_inbox = InboxV2::new(ident_id);
  
-@@ -138,6 +150,35 @@ where
+@@ -138,6 +150,40 @@ where
              .subscribe(&pq_inbox.delivery_address())
              .map_err(ChatError::generic)?;
  
-+        // #211: also re-subscribe every EXISTING conversation's delivery topic.
-+        // Otherwise a restored session subscribes ONLY the invite inbox (above),
-+        // so it receives NOTHING on prior chats until it *sends* to them (sending
-+        // is what re-subscribes) — a passive receiver stayed dark until it replied,
-+        // then everything flushed at once. Re-subscribing here lets the delivery
-+        // layer's periodic store catch-up pull missed messages without a send.
-+        // The topic derives from the convo id alone (no MLS load needed), so this
-+        // works even for a GroupV2 row that can't be rebuilt. Best-effort: a bad
-+        // row is skipped, never failing the open.
++        // #211: also re-subscribe every EXISTING *reloadable* conversation's
++        // delivery topic. Otherwise a restored session subscribes ONLY the invite
++        // inbox (above), so it receives NOTHING on prior chats until it *sends* to
++        // them (sending is what re-subscribes) — a passive receiver stayed dark
++        // until it replied, then everything flushed at once. Re-subscribing here
++        // lets the delivery layer's periodic store catch-up pull missed messages
++        // without a send.
++        //
++        // GroupV2 is deliberately SKIPPED: de-mls has no load path, so a GroupV2
++        // from a previous session cannot be rebuilt (`load_convo` returns
++        // `group_v2_not_reloadable`). Subscribing it would only pull messages the
++        // lib then fails to process — surfacing a "cannot be rebuilt" error per
++        // message. A GroupV2 created/joined *this* session subscribes via its own
++        // create/join path and is unaffected. Best-effort: a bad row is skipped,
++        // never failing the open.
 +        match store.load_conversations() {
 +            Ok(metas) => {
 +                for meta in metas {
@@ -1445,10 +1440,9 @@ index 99ad312..22c8a69 100644
 +                        ConversationKind::GroupV1 => {
 +                            GroupV1Convo::delivery_address_from_id(&meta.local_convo_id)
 +                        }
-+                        ConversationKind::GroupV2 => {
-+                            GroupV2Convo::delivery_address_from_id(&meta.local_convo_id)
-+                        }
-+                        ConversationKind::Unknown(_) => continue,
++                        // GroupV2 can't be reloaded → don't pull its undecryptable
++                        // messages; Unknown rows have no derivable topic.
++                        ConversationKind::GroupV2 | ConversationKind::Unknown(_) => continue,
 +                    };
 +                    if let Err(e) = delivery.subscribe(&addr) {
 +                        info!(convo = %meta.local_convo_id, "re-subscribe on open failed: {e}");
@@ -1461,7 +1455,7 @@ index 99ad312..22c8a69 100644
          Ok(Self {
              services: ServiceContext {
                  ds: delivery,
-@@ -180,7 +221,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -180,7 +226,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      /// Idempotent on the server side (registries that retain history will keep
      /// the most recent N submissions; older entries are pruned).
      pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
@@ -1487,7 +1481,7 @@ index 99ad312..22c8a69 100644
      }
  
      pub fn installation_name(&self) -> &str {
-@@ -204,7 +262,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -204,7 +267,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      ) -> Result<ConversationId, ChatError> {
          let convo = DirectV1Convo::new(&mut self.services, members)?;
          let convo_id = convo.id().to_string();
@@ -1506,7 +1500,7 @@ index 99ad312..22c8a69 100644
  
          Ok(convo_id)
      }
-@@ -235,6 +304,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -235,6 +309,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let convo_id = convo.id().to_string();
  
          self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
@@ -1514,7 +1508,7 @@ index 99ad312..22c8a69 100644
  
          Ok(convo_id)
      }
-@@ -252,7 +322,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -252,7 +327,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          convo.add_member(&mut self.services, participants)?;
          let convo_id = convo.id().to_string();
  
@@ -1535,7 +1529,7 @@ index 99ad312..22c8a69 100644
  
          Ok(convo_id)
      }
-@@ -262,6 +345,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -262,6 +350,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          &mut self,
          convo_id: &str,
          members: &[IdentIdRef],
@@ -1555,7 +1549,7 @@ index 99ad312..22c8a69 100644
      ) -> Result<(), ChatError> {
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
-@@ -284,6 +380,39 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -284,6 +385,39 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          }
      }
  
@@ -1595,7 +1589,7 @@ index 99ad312..22c8a69 100644
      /// Each member's MLS leaf-credential content (hex-encoded); errors if
      /// `convo_id` names a direct (non-group) conversation.
      pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
-@@ -333,6 +462,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -333,6 +467,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
  
      /// Encrypt and publish `content` to an existing conversation.
      pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
@@ -1608,7 +1602,7 @@ index 99ad312..22c8a69 100644
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
                  .cached_convos
-@@ -345,9 +480,51 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -345,9 +485,51 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          }
      }
  
@@ -1661,7 +1655,7 @@ index 99ad312..22c8a69 100644
          let env = EnvelopeV1::decode(payload)?;
  
          // TODO: Impl Conversation hinting
-@@ -403,6 +580,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -403,6 +585,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      }
  
      pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
@@ -1674,7 +1668,7 @@ index 99ad312..22c8a69 100644
          info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
  
          match convo_id {
-@@ -440,6 +623,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -440,6 +628,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          Ok(match record.kind {
              ConversationKind::GroupV1 => Box::new(self.load_mls_convo(&record.local_convo_id)?),
@@ -1682,7 +1676,7 @@ index 99ad312..22c8a69 100644
              ConversationKind::Unknown(_) => {
                  return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
              }
-@@ -451,6 +635,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -451,6 +640,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          match record.kind {
              ConversationKind::GroupV1 => Ok(Box::new(self.load_mls_convo(&record.local_convo_id)?)),
@@ -1690,7 +1684,7 @@ index 99ad312..22c8a69 100644
              ConversationKind::Unknown(_) => {
                  Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
              }
-@@ -493,6 +678,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -493,6 +683,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      }
  }
  
@@ -1707,7 +1701,7 @@ index 99ad312..22c8a69 100644
  enum ConvoTypeOwned<S: ExternalServices> {
      Direct(Box<dyn Convo<S>>),
      Group(Box<dyn GroupConvo<S>>),
-@@ -528,6 +723,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
+@@ -528,6 +728,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
          }
      }
  

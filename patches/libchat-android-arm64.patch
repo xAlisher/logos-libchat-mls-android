@@ -1179,10 +1179,61 @@ index 8a6cb01..9dd69b2 100644
          &mut self,
          cx: &mut ServiceContext<S>,
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
-index 6d6b64a..cb66db1 100644
+index 6d6b64a..cbbb4cd 100644
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
-@@ -70,13 +70,19 @@ impl GroupV1Convo {
+@@ -5,6 +5,7 @@
+ use blake2::{Blake2b, Digest, digest::consts::U6};
+ use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
+ use chat_proto::logoschat::reliability::ReliablePayload;
++use openmls::extensions::{Extension, Extensions, UnknownExtension};
+ use openmls::prelude::tls_codec::Deserialize;
+ use openmls::prelude::*;
+ use prost::Message as _;
+@@ -13,6 +14,9 @@ use std::collections::VecDeque;
+ use tracing::debug;
+ 
+ use crate::conversation::ConversationIdRef;
++use crate::conversation::mls_extensions::{
++    ConvoMetaInfo, GROUP_METADATA_EXTENSION_TYPE, capabilities_with_group_metadata,
++};
+ use crate::inbox_v2::MlsProvider;
+ use crate::service_context::{ExternalServices, ServiceContext};
+ 
+@@ -46,8 +50,31 @@ impl std::fmt::Debug for GroupV1Convo {
+ 
+ impl GroupV1Convo {
+     // Create a new conversation with the creator as the only participant.
++    // No group-metadata extension: this is the DirectV1 (1-1) delegate path, and
++    // the *absence* of the metadata extension is what distinguishes a 1-1 from a
++    // real group when a joiner classifies an incoming GroupV1 welcome (see
++    // `read_metadata` + `InboxV2::handle_frame`).
+     pub fn new<S: ExternalServices>(cx: &mut ServiceContext<S>) -> Result<Self, ChatError> {
+-        let config = Self::mls_create_config(cx);
++        Self::new_inner(cx, None)
++    }
++
++    // Create a new *group* conversation carrying a name/description in an MLS
++    // group-context extension (mirrors GroupV2's `group_config`), so joiners
++    // receive the group's identity in the Welcome and it survives a restart with
++    // the persisted MLS state. Used by `Core::create_group_convo_v1`.
++    pub fn new_with_meta<S: ExternalServices>(
++        cx: &mut ServiceContext<S>,
++        name: &str,
++        desc: &str,
++    ) -> Result<Self, ChatError> {
++        Self::new_inner(cx, Some((name, desc)))
++    }
++
++    fn new_inner<S: ExternalServices>(
++        cx: &mut ServiceContext<S>,
++        meta: Option<(&str, &str)>,
++    ) -> Result<Self, ChatError> {
++        let config = Self::mls_create_config(cx, meta);
+         let mls_group = MlsGroup::new(
+             &cx.mls_provider,
+             &cx.mls_identity,
+@@ -70,13 +97,19 @@ impl GroupV1Convo {
          cx: &mut ServiceContext<S>,
          welcome: Welcome,
      ) -> Result<Self, ChatError> {
@@ -1205,7 +1256,36 @@ index 6d6b64a..cb66db1 100644
  
          let convo_id = hex::encode(mls_group.group_id().as_slice());
          Self::subscribe(&mut cx.ds, &convo_id)?;
-@@ -125,7 +131,9 @@ impl GroupV1Convo {
+@@ -114,18 +147,34 @@ impl GroupV1Convo {
+         Ok(())
+     }
+ 
+-    fn mls_create_config<S: ExternalServices>(cx: &mut ServiceContext<S>) -> MlsGroupCreateConfig {
+-        MlsGroupCreateConfig::builder()
++    fn mls_create_config<S: ExternalServices>(
++        cx: &mut ServiceContext<S>,
++        meta: Option<(&str, &str)>,
++    ) -> MlsGroupCreateConfig {
++        let mut builder = MlsGroupCreateConfig::builder()
+             .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
+-            .use_ratchet_tree_extension(true) // This is handy for now, until there is central store for this data
+-            .build()
++            .use_ratchet_tree_extension(true); // This is handy for now, until there is central store for this data
++        if let Some((name, desc)) = meta {
++            let info = ConvoMetaInfo::new(name, desc);
++            let extensions = Extensions::from_vec(vec![Extension::Unknown(
++                GROUP_METADATA_EXTENSION_TYPE,
++                UnknownExtension(info.to_extension_bytes()),
++            )])
++            .expect("failed to build group metadata extensions");
++            builder = builder
++                .capabilities(capabilities_with_group_metadata())
++                .with_group_context_extensions(extensions);
++        }
++        builder.build()
+     }
+ 
+     fn mls_join_config() -> MlsGroupJoinConfig {
          MlsGroupJoinConfig::builder().build()
      }
  
@@ -1216,7 +1296,33 @@ index 6d6b64a..cb66db1 100644
          let hash = Blake2b::<U6>::new()
              .chain_update("delivery_addr|")
              .chain_update(convo_id)
-@@ -165,6 +173,23 @@ impl GroupV1Convo {
+@@ -137,6 +186,25 @@ impl GroupV1Convo {
+         Self::delivery_address_from_id(&self.convo_id)
+     }
+ 
++    /// Read the group's name/description out of the MLS group-context extension,
++    /// if present. `None` for a plain group (e.g. the DirectV1 1-1 delegate,
++    /// which is created without the extension) — that absence is also the signal
++    /// a joiner uses to classify an incoming welcome as a 1-1 vs a real group.
++    pub(crate) fn read_metadata(&self) -> Option<ConvoMetadata> {
++        self.mls_group
++            .extensions()
++            .iter()
++            .find_map(|ext| {
++                if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
++                    && *ext_type == GROUP_METADATA_EXTENSION_TYPE
++                {
++                    return ConvoMetaInfo::from_extension_bytes(bytes).ok();
++                }
++                None
++            })
++            .map(Into::into)
++    }
++
+     /// Fetch a signer's KeyPackage from the registry. Members are signer
+     /// (installation) ids; resolving an account to its signers is the caller's
+     /// concern, above the core.
+@@ -165,6 +233,23 @@ impl GroupV1Convo {
          content: &[u8],
          cx: &mut ServiceContext<S>,
      ) -> Result<(), ChatError> {
@@ -1240,7 +1346,7 @@ index 6d6b64a..cb66db1 100644
          let sender_id = cx.mls_identity.id().as_str();
          let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
          let wire = reliable.encode_to_vec();
-@@ -172,26 +197,23 @@ impl GroupV1Convo {
+@@ -172,26 +257,23 @@ impl GroupV1Convo {
          let mls_message_out = self
              .mls_group
              .create_message(&cx.mls_provider, &cx.mls_identity, &wire)
@@ -1275,7 +1381,7 @@ index 6d6b64a..cb66db1 100644
          let aep = AddressedEncryptedPayload {
              delivery_address: self.delivery_address(),
              data: EncryptedPayload {
-@@ -200,9 +222,17 @@ impl GroupV1Convo {
+@@ -200,9 +282,17 @@ impl GroupV1Convo {
                  })),
              },
          };
@@ -1295,7 +1401,7 @@ index 6d6b64a..cb66db1 100644
          cx.ds
              .publish(env)
              .map_err(|e| ChatError::Delivery(e.to_string()))
-@@ -224,6 +254,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+@@ -224,6 +314,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
          self.send_message(content, cx)
      }
  
@@ -1310,6 +1416,14 @@ index 6d6b64a..cb66db1 100644
      fn handle_frame(
          &mut self,
          cx: &mut ServiceContext<S>,
+@@ -353,6 +451,6 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+     }
+ 
+     fn metadata(&self) -> Option<ConvoMetadata> {
+-        None
++        self.read_metadata()
+     }
+ }
 diff --git a/core/conversations/src/conversation/group_v2.rs b/core/conversations/src/conversation/group_v2.rs
 index c547e5a..17aa209 100644
 --- a/core/conversations/src/conversation/group_v2.rs
@@ -1371,7 +1485,7 @@ index c547e5a..17aa209 100644
          // Guarantee the local member is listed so callers see the full roster.
          let mut members = self.conversation.members()?;
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
-index 99ad312..7b14b9f 100644
+index 99ad312..637eb8b 100644
 --- a/core/conversations/src/core.rs
 +++ b/core/conversations/src/core.rs
 @@ -11,16 +11,20 @@ use crate::{
@@ -1500,7 +1614,33 @@ index 99ad312..7b14b9f 100644
  
          Ok(convo_id)
      }
-@@ -235,6 +309,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -213,17 +287,23 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         &mut self,
+         participants: &[IdentIdRef],
+     ) -> Result<ConversationId, ChatError> {
+-        self.create_group_convo_v2(participants, "", "")
++        // #103: default groups to GroupV1 (plain MLS), which persists and reloads
++        // across a node restart via `persist_mls_state` + `load_mls_convo`. GroupV2
++        // (de-mls) has no load path yet (see `group_v2_not_reloadable`), so a group
++        // created with it dies on restart. Long-term de-mls `resume` work: #187.
++        self.create_group_convo_v1(participants, "", "")
+     }
+ 
+     pub fn create_group_convo_v1(
+         &mut self,
+         participants: &[IdentIdRef],
++        name: &str,
++        desc: &str,
+     ) -> Result<ConversationId, ChatError> {
+         // TODO: (P1) Ensure errors are handled properly. This is a high chance for
+         // desynchronized state: MlsGroup persistence, conversation persistence, and
+         // invite delivery all happen separately.
+-        let mut convo = GroupV1Convo::new(&mut self.services)?;
++        let mut convo = GroupV1Convo::new_with_meta(&mut self.services, name, desc)?;
+         self.services
+             .store
+             .save_conversation(&storage::ConversationMeta {
+@@ -235,6 +315,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let convo_id = convo.id().to_string();
  
          self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
@@ -1508,7 +1648,7 @@ index 99ad312..7b14b9f 100644
  
          Ok(convo_id)
      }
-@@ -252,7 +327,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -252,7 +333,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          convo.add_member(&mut self.services, participants)?;
          let convo_id = convo.id().to_string();
  
@@ -1529,7 +1669,7 @@ index 99ad312..7b14b9f 100644
  
          Ok(convo_id)
      }
-@@ -262,6 +350,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -262,6 +356,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          &mut self,
          convo_id: &str,
          members: &[IdentIdRef],
@@ -1549,7 +1689,7 @@ index 99ad312..7b14b9f 100644
      ) -> Result<(), ChatError> {
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
-@@ -284,6 +385,39 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -284,6 +391,39 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          }
      }
  
@@ -1589,7 +1729,7 @@ index 99ad312..7b14b9f 100644
      /// Each member's MLS leaf-credential content (hex-encoded); errors if
      /// `convo_id` names a direct (non-group) conversation.
      pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
-@@ -333,6 +467,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -333,6 +473,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
  
      /// Encrypt and publish `content` to an existing conversation.
      pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
@@ -1602,7 +1742,7 @@ index 99ad312..7b14b9f 100644
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
                  .cached_convos
-@@ -345,9 +485,51 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -345,9 +491,51 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          }
      }
  
@@ -1655,7 +1795,7 @@ index 99ad312..7b14b9f 100644
          let env = EnvelopeV1::decode(payload)?;
  
          // TODO: Impl Conversation hinting
-@@ -403,6 +585,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -403,6 +591,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      }
  
      pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
@@ -1668,7 +1808,7 @@ index 99ad312..7b14b9f 100644
          info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
  
          match convo_id {
-@@ -440,6 +628,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -440,6 +634,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          Ok(match record.kind {
              ConversationKind::GroupV1 => Box::new(self.load_mls_convo(&record.local_convo_id)?),
@@ -1676,7 +1816,7 @@ index 99ad312..7b14b9f 100644
              ConversationKind::Unknown(_) => {
                  return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
              }
-@@ -451,6 +640,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -451,6 +646,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          match record.kind {
              ConversationKind::GroupV1 => Ok(Box::new(self.load_mls_convo(&record.local_convo_id)?)),
@@ -1684,7 +1824,7 @@ index 99ad312..7b14b9f 100644
              ConversationKind::Unknown(_) => {
                  Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
              }
-@@ -493,6 +683,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -493,6 +689,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      }
  }
  
@@ -1701,7 +1841,7 @@ index 99ad312..7b14b9f 100644
  enum ConvoTypeOwned<S: ExternalServices> {
      Direct(Box<dyn Convo<S>>),
      Group(Box<dyn GroupConvo<S>>),
-@@ -528,6 +728,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
+@@ -528,6 +734,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
          }
      }
  
@@ -1720,7 +1860,7 @@ index 99ad312..7b14b9f 100644
          &mut self,
          cx: &mut ServiceContext<S>,
 diff --git a/core/conversations/src/inbox_v2.rs b/core/conversations/src/inbox_v2.rs
-index ff63d7d..cf121cd 100644
+index ff63d7d..0405581 100644
 --- a/core/conversations/src/inbox_v2.rs
 +++ b/core/conversations/src/inbox_v2.rs
 @@ -11,7 +11,9 @@ use tracing::info;
@@ -1734,6 +1874,37 @@ index ff63d7d..cf121cd 100644
  
  use crate::ChatError;
  use crate::DeliveryService;
+@@ -121,9 +123,13 @@ impl InboxV2 {
+         conversation_id_for(&self.ident_id)
+     }
+ 
+-    /// The convo built from an invite, paired with the display class its invite
+-    /// type implies: `InviteType::GroupV1` carries the pairwise DirectV1 welcome,
+-    /// so it is `Private`; `InviteType::GroupV2` is a real group.
++    /// The convo built from an invite, paired with its display class.
++    /// `InviteType::GroupV1` now carries BOTH the pairwise DirectV1 welcome AND
++    /// real GroupV1 groups (#103). They are distinguished by the group-metadata
++    /// extension: a real group created via `create_group_convo_v1` carries a
++    /// `ConvoMetaInfo` group-context extension (name/desc), the DirectV1 1-1
++    /// delegate does not — so `read_metadata().is_some()` ⇒ `Group`, else
++    /// `Private`. `InviteType::GroupV2` is always a real group.
+     #[instrument(name = "inboxV2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
+     pub fn handle_frame<S: ExternalServices>(
+         &self,
+@@ -144,7 +150,12 @@ impl InboxV2 {
+         match payload {
+             InviteType::GroupV1(inv) => {
+                 let convo = self.handle_heavy_invite(service_ctx, inv)?;
+-                Ok(Some((Box::new(convo), ConversationClass::Private)))
++                let class = if convo.read_metadata().is_some() {
++                    ConversationClass::Group
++                } else {
++                    ConversationClass::Private
++                };
++                Ok(Some((Box::new(convo), class)))
+             }
+             InviteType::GroupV2(welcome_bytes) => {
+                 info!("Process WelcomeMessage");
 diff --git a/core/conversations/src/inbox_v2/mls_provider.rs b/core/conversations/src/inbox_v2/mls_provider.rs
 index f55f60f..0776bf8 100644
 --- a/core/conversations/src/inbox_v2/mls_provider.rs
@@ -1890,6 +2061,35 @@ index bba6e10..f8d4ee4 100644
      pub fn sign(&self, msg: &[u8]) -> Ed25519Signature {
          self.0.sign(msg).to_bytes().into()
      }
+diff --git a/core/integration_tests_core/tests/causal_history.rs b/core/integration_tests_core/tests/causal_history.rs
+index 434fad0..9f546bf 100644
+--- a/core/integration_tests_core/tests/causal_history.rs
++++ b/core/integration_tests_core/tests/causal_history.rs
+@@ -107,7 +107,10 @@ fn missing_group_message_is_detected() {
+ 
+     // Saro creates a group with Raya.
+     let raya_id = raya.ident_id().clone();
+-    let convo_id = saro.create_group_convo_v1(&[&raya_id]).unwrap().to_string();
++    let convo_id = saro
++        .create_group_convo_v1(&[&raya_id], "", "")
++        .unwrap()
++        .to_string();
+ 
+     // Raya joins (processes the Welcome + commit).
+     raya.process_messages();
+diff --git a/core/integration_tests_core/tests/mls_integration.rs b/core/integration_tests_core/tests/mls_integration.rs
+index d80e690..6190612 100644
+--- a/core/integration_tests_core/tests/mls_integration.rs
++++ b/core/integration_tests_core/tests/mls_integration.rs
+@@ -20,7 +20,7 @@ fn create_group() {
+ 
+     let convo_id = harness
+         .saro()
+-        .create_group_convo_v1(&[&raya_id])
++        .create_group_convo_v1(&[&raya_id], "", "")
+         .expect("Saro invite Raya ");
+     harness.process_until(|h| h.raya().list_conversations().unwrap().len() == 1);
+ 
 diff --git a/core/sqlite/src/lib.rs b/core/sqlite/src/lib.rs
 index b021965..fb42c1e 100644
 --- a/core/sqlite/src/lib.rs
@@ -2082,7 +2282,7 @@ index d05b05a..0f74993 100644
 +{
 +}
 diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
-index a684ecd..c85d596 100644
+index a684ecd..03be65c 100644
 --- a/crates/generic-chat/src/client.rs
 +++ b/crates/generic-chat/src/client.rs
 @@ -6,8 +6,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
@@ -2188,7 +2388,21 @@ index a684ecd..c85d596 100644
      // Creates a conversation between two Accounts.
      pub fn create_direct_conversation(
          &mut self,
-@@ -222,6 +267,20 @@ where
+@@ -198,9 +243,12 @@ where
+         let signers = self.signers_from_accounts(accounts)?;
+         let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
+ 
++        // #103: create groups as GroupV1 so they survive a node restart (GroupV2
++        // has no reload path yet — see core.rs / #187). Name+desc ride an MLS
++        // group-context extension, same as GroupV2 carried them.
+         self.core
+             .lock()
+-            .create_group_convo_v2(&signer_refs, &metadata.name, &metadata.desc)
++            .create_group_convo_v1(&signer_refs, &metadata.name, &metadata.desc)
+             .map_err(Into::into)
+     }
+ 
+@@ -222,6 +270,20 @@ where
              .map_err(Into::into)
      }
  
@@ -2209,7 +2423,7 @@ index a684ecd..c85d596 100644
      /// The group's roster, one [`GroupMember`] per account (self included). An
      /// account's several devices collapse to a single entry surfacing that
      /// account; a member whose account claim the directory can't confirm stays
-@@ -246,6 +305,15 @@ where
+@@ -246,6 +308,15 @@ where
              .map_err(Into::into)
      }
  
@@ -2225,7 +2439,7 @@ index a684ecd..c85d596 100644
      /// List all conversation IDs known to this client.
      pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
          self.core.lock().list_conversations().map_err(Into::into)
-@@ -260,6 +328,31 @@ where
+@@ -260,6 +331,31 @@ where
              .map_err(Into::into)
      }
  
@@ -2257,7 +2471,7 @@ index a684ecd..c85d596 100644
      /// Resolve an account address to the signer (device) ids its published
      /// directory bundle endorses. A reachable account has published at least
      /// one signer; anything else is an error.
-@@ -310,6 +403,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -310,6 +406,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      core: Arc<Mutex<ClientCore<T, R, S>>>,
      directory: R,
      inbound: Receiver<Vec<u8>>,
@@ -2265,7 +2479,7 @@ index a684ecd..c85d596 100644
      wakeup_events: Receiver<WakeupEvent>,
      shutdown: Receiver<()>,
      event_tx: Sender<Event>,
-@@ -317,28 +411,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -317,28 +414,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      T: DeliveryService + Send + 'static,
      R: RegistrationService + AccountDirectory + Send + 'static,
  {

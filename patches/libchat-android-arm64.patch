@@ -1179,7 +1179,7 @@ index 8a6cb01..9dd69b2 100644
          &mut self,
          cx: &mut ServiceContext<S>,
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
-index 6d6b64a..cbbb4cd 100644
+index 6d6b64a..ee7fcbd 100644
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
 @@ -5,6 +5,7 @@
@@ -1416,7 +1416,48 @@ index 6d6b64a..cbbb4cd 100644
      fn handle_frame(
          &mut self,
          cx: &mut ServiceContext<S>,
-@@ -353,6 +451,6 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -307,6 +405,16 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+         cx: &mut ServiceContext<S>,
+         members: &[IdentIdRef],
+     ) -> Result<(), ChatError> {
++        // Adding zero members is a no-op, not an error. The app creates groups
++        // creator-only (participants empty) and adds members later via the Add
++        // Members screen, so this path is hit on every group create. Guard it:
++        // `MlsGroup::add_members(&[])` returns `EmptyInput(AddMembers)`, which the
++        // `.unwrap()` below would turn into a panic → SIGSEGV. (GroupV2's
++        // consensus add_member tolerated empty input; plain MLS does not.)
++        if members.is_empty() {
++            return Ok(());
++        }
++
+         if members.len() > 50 {
+             // This is a temporary limit that originates from the the De-MLS epoch time.
+             return Err(ChatError::Protocol(
+@@ -322,6 +430,9 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+             keypkgs.push(self.key_package_for_signer(ident, &cx.mls_provider, &cx.registry)?);
+         }
+ 
++        // NB: never `.unwrap()` an MLS op on a worker thread — an Err panics and
++        // SIGSEGVs the whole process (same footgun as new_from_welcome). Surface
++        // it as a ChatError instead.
+         let (commit, welcome, _group_info) = self
+             .mls_group
+             .add_members(
+@@ -329,11 +440,11 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+                 &cx.mls_identity,
+                 keypkgs.iter().as_slice(),
+             )
+-            .unwrap();
++            .map_err(ChatError::generic)?;
+ 
+         self.mls_group
+             .merge_pending_commit(&cx.mls_provider)
+-            .unwrap();
++            .map_err(ChatError::generic)?;
+ 
+         // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
+         for signer_id in members {
+@@ -353,6 +464,6 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
      }
  
      fn metadata(&self) -> Option<ConvoMetadata> {
@@ -1485,7 +1526,7 @@ index c547e5a..17aa209 100644
          // Guarantee the local member is listed so callers see the full roster.
          let mut members = self.conversation.members()?;
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
-index 99ad312..637eb8b 100644
+index 99ad312..4b4a718 100644
 --- a/core/conversations/src/core.rs
 +++ b/core/conversations/src/core.rs
 @@ -11,16 +11,20 @@ use crate::{
@@ -1824,7 +1865,47 @@ index 99ad312..637eb8b 100644
              ConversationKind::Unknown(_) => {
                  Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
              }
-@@ -493,6 +689,16 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -475,24 +671,49 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+             .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
+     }
+ 
+-    pub fn convo_metadata(&self, convo_id: ConversationIdRef) -> Result<ConvoMetadata, ChatError> {
++    pub fn convo_metadata(
++        &mut self,
++        convo_id: ConversationIdRef,
++    ) -> Result<ConvoMetadata, ChatError> {
++        let unsupported = || {
++            ChatError::UnsupportedConvoType(
++                "metadata is not available for this legacy convo_type".into(),
++            )
++        };
+         match self.cached_convos.get(convo_id) {
+             Some(ConvoTypeOwned::Group(group_convo)) => {
+-                group_convo
+-                    .metadata()
+-                    .ok_or(ChatError::UnsupportedConvoType(
+-                        "metadata is not available for this legacy convo_type".into(),
+-                    ))
++                group_convo.metadata().ok_or_else(unsupported)
+             }
+             Some(ConvoTypeOwned::Direct(_)) => Err(ChatError::UnsupportedFunction(
+                 convo_id.into(),
+                 "implementation coming".into(),
+             )),
+-            None => Err(ChatError::NoConvo(convo_id.into())),
++            // #103: after a restart `cached_convos` is empty — groups load lazily
++            // on their first operation. Without loading here, a GroupV1 that
++            // reloads perfectly still reports `NoConvo` ("was not found"), which
++            // the #112 liveness probe reads as a DEAD group → the app shows the
++            // "Group ended when the app restarted" screen for a group that is in
++            // fact fully operable. Load it and read its metadata. (A GroupV2 still
++            // can't reload — `load_group_convo` returns `group_v2_not_reloadable`,
++            // correctly surfacing as dead for the legacy type.)
++            None => self
++                .load_group_convo(convo_id)?
++                .metadata()
++                .ok_or_else(unsupported),
+         }
      }
  }
  
@@ -1841,7 +1922,7 @@ index 99ad312..637eb8b 100644
  enum ConvoTypeOwned<S: ExternalServices> {
      Direct(Box<dyn Convo<S>>),
      Group(Box<dyn GroupConvo<S>>),
-@@ -528,6 +734,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
+@@ -528,6 +749,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
          }
      }
  

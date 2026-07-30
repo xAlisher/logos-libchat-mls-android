@@ -389,6 +389,28 @@ pub unsafe extern "C" fn logoschat_set_delivery_active(h: *mut c_void, active: c
     }
 }
 
+/// #292: force an immediate store catch-up on all active topics. Called on app
+/// foreground so messages/reactions that arrived while the node was frozen surface at
+/// once, instead of waiting for the next periodic (~20s) pull. No-op while paused.
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `h` must be a valid handle from `logoschat_open`/`logoschat_open_persistent`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_catchup_now(h: *mut c_void) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    match h.client.catchup_now() {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("catchup_now failed: {e}"));
+            -1
+        }
+    }
+}
+
 /// #239: our contact card as JSON — everything a peer needs to add us to an MLS
 /// conversation OFFLINE (over BLE), without the HTTP registry:
 /// `{account, device, keyPackage, bundlePayload, bundleSig}` (byte fields base64).

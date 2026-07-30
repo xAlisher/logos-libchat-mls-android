@@ -2329,10 +2329,10 @@ index 18877e7..df8271c 100644
          }
      }
 diff --git a/core/conversations/src/service_traits.rs b/core/conversations/src/service_traits.rs
-index dac2516..56fcc21 100644
+index dac2516..a929ca0 100644
 --- a/core/conversations/src/service_traits.rs
 +++ b/core/conversations/src/service_traits.rs
-@@ -17,6 +17,20 @@ pub trait DeliveryService: Debug {
+@@ -17,6 +17,26 @@ pub trait DeliveryService: Debug {
      type Error: Display + Debug;
      fn publish(&mut self, envelope: AddressedEnvelope) -> Result<(), Self::Error>;
      fn subscribe(&mut self, delivery_address: &str) -> Result<(), Self::Error>;
@@ -2341,6 +2341,12 @@ index dac2516..56fcc21 100644
 +    /// transports like BLE). Default no-op for transports that don't support it
 +    /// (e.g. the in-process test transport).
 +    fn set_active(&mut self, _active: bool) -> Result<(), Self::Error> {
++        Ok(())
++    }
++    /// #292: force an immediate catch-up/refresh of missed inbound (e.g. an embedded
++    /// node's store pull), called on app foreground. Default no-op for transports that
++    /// deliver synchronously (e.g. the in-process test transport).
++    fn catchup_now(&mut self) -> Result<(), Self::Error> {
 +        Ok(())
 +    }
 +    /// #239: drain envelopes that were buffered instead of published (delivery
@@ -2599,7 +2605,7 @@ index d05b05a..0f74993 100644
 +{
 +}
 diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
-index a684ecd..b2e316f 100644
+index a684ecd..da8e151 100644
 --- a/crates/generic-chat/src/client.rs
 +++ b/crates/generic-chat/src/client.rs
 @@ -6,8 +6,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
@@ -2672,7 +2678,7 @@ index a684ecd..b2e316f 100644
              },
              event_rx,
          )
-@@ -169,6 +188,32 @@ where
+@@ -169,6 +188,43 @@ where
          self.core.lock().installation_name().to_string()
      }
  
@@ -2685,6 +2691,17 @@ index a684ecd..b2e316f 100644
 +            .lock()
 +            .ds()
 +            .set_active(active)
++            .map_err(|e| ClientError::Transport(e.to_string()))
++    }
++
++    /// #292: force an immediate store catch-up on all active topics (call on app
++    /// foreground so messages/reactions that arrived while the node was frozen surface
++    /// at once, not on the next periodic pull). Best-effort; no-op while paused.
++    pub fn catchup_now(&mut self) -> Result<(), ClientError> {
++        self.core
++            .lock()
++            .ds()
++            .catchup_now()
 +            .map_err(|e| ClientError::Transport(e.to_string()))
 +    }
 +
@@ -2705,7 +2722,7 @@ index a684ecd..b2e316f 100644
      // Creates a conversation between two Accounts.
      pub fn create_direct_conversation(
          &mut self,
-@@ -198,9 +243,12 @@ where
+@@ -198,9 +254,12 @@ where
          let signers = self.signers_from_accounts(accounts)?;
          let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
  
@@ -2719,7 +2736,7 @@ index a684ecd..b2e316f 100644
              .map_err(Into::into)
      }
  
-@@ -222,6 +270,20 @@ where
+@@ -222,6 +281,20 @@ where
              .map_err(Into::into)
      }
  
@@ -2740,7 +2757,7 @@ index a684ecd..b2e316f 100644
      /// The group's roster, one [`GroupMember`] per account (self included). An
      /// account's several devices collapse to a single entry surfacing that
      /// account; a member whose account claim the directory can't confirm stays
-@@ -246,6 +308,15 @@ where
+@@ -246,6 +319,15 @@ where
              .map_err(Into::into)
      }
  
@@ -2756,7 +2773,7 @@ index a684ecd..b2e316f 100644
      /// List all conversation IDs known to this client.
      pub fn list_conversations(&self) -> Result<Vec<ConversationId>, ClientError> {
          self.core.lock().list_conversations().map_err(Into::into)
-@@ -260,6 +331,31 @@ where
+@@ -260,6 +342,31 @@ where
              .map_err(Into::into)
      }
  
@@ -2788,7 +2805,7 @@ index a684ecd..b2e316f 100644
      /// Resolve an account address to the signer (device) ids its published
      /// directory bundle endorses. A reachable account has published at least
      /// one signer; anything else is an error.
-@@ -310,6 +406,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -310,6 +417,7 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      core: Arc<Mutex<ClientCore<T, R, S>>>,
      directory: R,
      inbound: Receiver<Vec<u8>>,
@@ -2796,7 +2813,7 @@ index a684ecd..b2e316f 100644
      wakeup_events: Receiver<WakeupEvent>,
      shutdown: Receiver<()>,
      event_tx: Sender<Event>,
-@@ -317,28 +414,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
+@@ -317,28 +425,46 @@ fn worker_loop<T, R, S: ChatStore + 'static>(
      T: DeliveryService + Send + 'static,
      R: RegistrationService + AccountDirectory + Send + 'static,
  {
@@ -2858,7 +2875,7 @@ index a684ecd..b2e316f 100644
                  }
              }
              recv(wakeup_events) -> msg => {
-@@ -527,6 +642,7 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
+@@ -527,6 +653,7 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
      let ConvoOutcome {
          convo_id,
          content,
@@ -2866,7 +2883,7 @@ index a684ecd..b2e316f 100644
          members_changed,
      } = outcome;
      let convo_id: Arc<str> = Arc::from(convo_id);
-@@ -540,6 +656,17 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
+@@ -540,6 +667,17 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
              sender,
          });
      }
@@ -3423,10 +3440,10 @@ index 2bf84f9..009d6ea 100644
      fn default() -> Self {
          Self::new()
 diff --git a/extensions/embedded-logos-delivery/src/lib.rs b/extensions/embedded-logos-delivery/src/lib.rs
-index a9c83cb..030d855 100644
+index a9c83cb..b08d9ad 100644
 --- a/extensions/embedded-logos-delivery/src/lib.rs
 +++ b/extensions/embedded-logos-delivery/src/lib.rs
-@@ -87,6 +87,18 @@ impl DeliveryService for EmbeddedLogosDelivery {
+@@ -87,6 +87,23 @@ impl DeliveryService for EmbeddedLogosDelivery {
      ) -> Result<(), <Self as DeliveryService>::Error> {
          self.inner.subscribe(&content_topic_for(delivery_address))
      }
@@ -3435,6 +3452,11 @@ index a9c83cb..030d855 100644
 +    /// subscriptions) while keeping the node — and the MLS engine — alive.
 +    fn set_active(&mut self, active: bool) -> Result<(), DeliveryError> {
 +        self.inner.set_active(active)
++    }
++
++    /// #292: force an immediate store pull on all active topics (app foreground).
++    fn catchup_now(&mut self) -> Result<(), DeliveryError> {
++        self.inner.catchup_now()
 +    }
 +
 +    /// #239: drain envelopes buffered while paused (e.g. an offline create's
@@ -3531,7 +3553,7 @@ index 2036116..6c38816 100644
  
  // ── Trampoline ───────────────────────────────────────────────────────────────
 diff --git a/extensions/logos-delivery-rust/src/threaded.rs b/extensions/logos-delivery-rust/src/threaded.rs
-index 2533039..5267de6 100644
+index 2533039..329436f 100644
 --- a/extensions/logos-delivery-rust/src/threaded.rs
 +++ b/extensions/logos-delivery-rust/src/threaded.rs
 @@ -1,3 +1,5 @@
@@ -3540,7 +3562,7 @@ index 2533039..5267de6 100644
  use std::sync::{Arc, Mutex, mpsc};
  use std::thread;
  use std::time::Duration;
-@@ -27,10 +29,15 @@ pub enum DeliveryError {
+@@ -27,12 +29,18 @@ pub enum DeliveryError {
  
  // ── Internals ────────────────────────────────────────────────────────────────
  
@@ -3557,8 +3579,11 @@ index 2533039..5267de6 100644
 +    },
      Subscribe(String),   // content_topic
      Unsubscribe(String), // content_topic
++    CatchupNow,          // #292: force an immediate store pull on all active topics
  }
-@@ -71,7 +78,7 @@ impl Default for P2pConfig {
+ 
+ #[derive(Debug)]
+@@ -71,7 +79,7 @@ impl Default for P2pConfig {
  
  // ── Wire types ──────────────────────────────────────────────────────────────
  
@@ -3567,7 +3592,7 @@ index 2533039..5267de6 100644
  #[derive(Debug, serde::Serialize, serde::Deserialize)]
  struct WakuMessage {
      #[serde(rename = "contentTopic")]
-@@ -81,20 +88,72 @@ struct WakuMessage {
+@@ -81,20 +89,72 @@ struct WakuMessage {
      ephemeral: bool,
  }
  
@@ -3644,7 +3669,7 @@ index 2533039..5267de6 100644
      }
  }
  
-@@ -136,6 +195,38 @@ impl WakuPayload {
+@@ -136,6 +196,38 @@ impl WakuPayload {
      }
  }
  
@@ -3683,7 +3708,7 @@ index 2533039..5267de6 100644
  // ── ThreadedDeliveryWrapper ─────────────────────────────────────────────────
  
  /// Owns the embedded node on a dedicated thread. Generic over the inbound item
-@@ -147,6 +238,18 @@ pub struct ThreadedDeliveryWrapper<T = WakuEvent> {
+@@ -147,6 +239,18 @@ pub struct ThreadedDeliveryWrapper<T = WakuEvent> {
      #[allow(dead_code)]
      subscribers: SubscriberList<T>,
      inbound_rx: Option<Receiver<T>>,
@@ -3702,7 +3727,7 @@ index 2533039..5267de6 100644
  }
  
  // Manual impls so `T` carries no `Clone`/`Debug` bound at the struct level —
-@@ -157,6 +260,9 @@ impl<T> Clone for ThreadedDeliveryWrapper<T> {
+@@ -157,6 +261,9 @@ impl<T> Clone for ThreadedDeliveryWrapper<T> {
              outbound: self.outbound.clone(),
              subscribers: self.subscribers.clone(),
              inbound_rx: self.inbound_rx.clone(),
@@ -3712,7 +3737,7 @@ index 2533039..5267de6 100644
          }
      }
  }
-@@ -220,6 +326,9 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -220,6 +327,9 @@ impl<T> ThreadedDeliveryWrapper<T> {
              outbound: out_tx,
              subscribers,
              inbound_rx: Some(inbound_rx),
@@ -3722,7 +3747,7 @@ index 2533039..5267de6 100644
          })
      }
  
-@@ -236,30 +345,76 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -236,30 +346,87 @@ impl<T> ThreadedDeliveryWrapper<T> {
      }
  
      /// Start delivering messages on `content_topic`. Blocks until acknowledged.
@@ -3805,10 +3830,21 @@ index 2533039..5267de6 100644
 +            }
 +        }
 +        Ok(())
++    }
++
++    /// #292: force an immediate store catch-up on every active topic. Called on app
++    /// foreground so messages/reactions that landed while the node was frozen surface
++    /// at once, instead of waiting for the next periodic (~20s) pull. No-op while
++    /// delivery is paused (nothing subscribed). Blocks until the node thread acks enqueue.
++    pub fn catchup_now(&self) -> Result<(), DeliveryError> {
++        if !self.active.load(Ordering::Relaxed) {
++            return Ok(());
++        }
++        self.send_cmd(NodeOp::CatchupNow)
      }
  
      /// Take the inbound queue of mapped items. Callable once.
-@@ -275,22 +430,130 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -275,22 +442,130 @@ impl<T> ThreadedDeliveryWrapper<T> {
          subscribers: SubscriberList<T>,
          inbound_tx: Sender<T>,
          ready_tx: mpsc::Sender<Result<(), DeliveryError>>,
@@ -3948,7 +3984,7 @@ index 2533039..5267de6 100644
  
          let mut node = match LogosNodeCtx::new(&config_json) {
              Ok(n) => n,
-@@ -305,12 +568,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -305,12 +580,39 @@ impl<T> ThreadedDeliveryWrapper<T> {
          // yet in the subscriber list.
          subscribers.lock().unwrap().push(inbound_tx);
  
@@ -3989,7 +4025,7 @@ index 2533039..5267de6 100644
                  return;
              };
              let mut guard = match subs_for_cb.lock() {
-@@ -332,7 +622,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -332,7 +634,12 @@ impl<T> ThreadedDeliveryWrapper<T> {
              let _ = ready_tx.send(Err(DeliveryError::StartupFailed(e)));
              return;
          }
@@ -4003,7 +4039,7 @@ index 2533039..5267de6 100644
  
          // FIXME: This unconditional sleep is a stand-in for proper
          // peer-connectivity detection. The right approach is to listen for a
-@@ -344,22 +639,365 @@ impl<T> ThreadedDeliveryWrapper<T> {
+@@ -344,22 +651,395 @@ impl<T> ThreadedDeliveryWrapper<T> {
  
          let _ = ready_tx.send(Ok(()));
  
@@ -4092,7 +4128,33 @@ index 2533039..5267de6 100644
 +                    continue;
 +                }
 +                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-+            };
+             };
++            // #292: CatchupNow — force an immediate store pull on every active topic,
++            // bypassing the periodic tick AND the debounce (called on app foreground so
++            // reactions/messages that arrived while the node was frozen surface at once
++            // instead of on the next ~20s tick). Same spawn as the periodic path.
++            if matches!(cmd.op, NodeOp::CatchupNow) {
++                let now = now_ns();
++                let topics: Vec<String> = active_topics.iter().cloned().collect();
++                info!(topic_count = topics.len(), "delivery catchup_now");
++                for topic in topics {
++                    let start_ns =
++                        Self::catchup_start_ns(last_catchup.get(&topic).copied(), now);
++                    last_catchup.insert(topic.clone(), now);
++                    let node = node.clone();
++                    let subscribers = subscribers.clone();
++                    let map = map.clone();
++                    let store_peer = store_peer.clone();
++                    let seen = seen_hashes.clone();
++                    thread::spawn(move || {
++                        Self::store_catch_up(
++                            &node, &store_peer, &topic, start_ns, &subscribers, &map, &seen,
++                        );
++                    });
++                }
++                let _ = cmd.reply.try_send(Ok(()));
++                continue;
++            }
 +            // Track the active-topic set so the periodic pull knows what to refresh.
 +            match &cmd.op {
 +                NodeOp::Subscribe(t) => {
@@ -4177,6 +4239,8 @@ index 2533039..5267de6 100644
 +                        }
 +                        Err(e) => Err(DeliveryError::PublishFailed(e)),
 +                    },
++                    // #292: CatchupNow is handled + `continue`d before this match.
++                    NodeOp::CatchupNow => unreachable!("CatchupNow handled before op execution"),
 +                }
 +            } else {
 +                // ── Plain relay/filter path (no backfill) ──
@@ -4204,8 +4268,10 @@ index 2533039..5267de6 100644
 +                            Err(e) => Err(DeliveryError::PublishFailed(e.to_string())),
 +                        }
 +                    }
++                    // #292: CatchupNow is handled + `continue`d before this match.
++                    NodeOp::CatchupNow => unreachable!("CatchupNow handled before op execution"),
 +                }
-             };
++            };
 +            // Ack the caller BEFORE catch-up so the subscribe returns promptly;
 +            // the catch-up then runs (serially) on this node thread.
 +            let ok = result.is_ok();

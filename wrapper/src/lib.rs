@@ -93,6 +93,8 @@ const EVENT_CONVERSATION_STARTED: c_int = 1;
 const EVENT_MESSAGE_RECEIVED: c_int = 2;
 const EVENT_MEMBERS_CHANGED: c_int = 3;
 const EVENT_INBOUND_ERROR: c_int = 4;
+// #348: the local member is stuck on an old MLS epoch and cannot recover in-band.
+const EVENT_CONVERSATION_DESYNCED: c_int = 5;
 
 struct SendPtr {
     cb: EventCallback,
@@ -792,6 +794,10 @@ fn event_json(ev: &Event) -> (c_int, String) {
         }
         Event::ConversationMembersChanged { convo_id } => (
             EVENT_MEMBERS_CHANGED,
+            format!(r#"{{"convoId":{}}}"#, json_str(convo_id)),
+        ),
+        Event::ConversationDesynced { convo_id } => (
+            EVENT_CONVERSATION_DESYNCED,
             format!(r#"{{"convoId":{}}}"#, json_str(convo_id)),
         ),
         Event::InboundError { message } => (

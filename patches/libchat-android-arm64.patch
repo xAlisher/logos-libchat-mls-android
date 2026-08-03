@@ -1265,7 +1265,7 @@ index 8a6cb01..fb6ccda 100644
 +    }
  }
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
-index 6d6b64a..eec9563 100644
+index 6d6b64a..e81c0fd 100644
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
 @@ -2,9 +2,18 @@
@@ -1298,7 +1298,7 @@ index 6d6b64a..eec9563 100644
  use crate::inbox_v2::MlsProvider;
  use crate::service_context::{ExternalServices, ServiceContext};
  
-@@ -23,18 +35,48 @@ use crate::{
+@@ -23,16 +35,84 @@ use crate::{
      conversation::{ChatError, Convo, GroupConvo, Identified},
      outcomes::{Content, ConvoOutcome},
      service_traits::KeyPackageProvider,
@@ -1340,15 +1340,51 @@ index 6d6b64a..eec9563 100644
 +    // Transient (not persisted) — the store catch-up re-supplies them after a
 +    // restart. Bounded to avoid unbounded growth if a commit never arrives.
 +    pending_future: VecDeque<Vec<u8>>,
- }
- 
++    // #348: consecutive inbound frames that were buffered for a FUTURE epoch
++    // without any commit advancing us in between. A single missed commit makes
++    // every later frame arrive at cur+1 forever, so this counter climbs; a real
++    // commit resets it. When it crosses FUTURE_STALL_THRESHOLD we conclude we
++    // have fallen out of sync and cannot recover in-band.
++    future_stall: u32,
++    // #348: edge-trigger latch so we flag the desync exactly once (not on every
++    // subsequent stalled frame). Reset when a commit finally advances the epoch.
++    desync_flagged: bool,
++}
++
 +// #289: cap on buffered future-epoch frames per group.
 +const PENDING_FUTURE_MAX: usize = 256;
 +
++// #348: how many consecutive future-buffered frames (with no intervening commit)
++// before we conclude the epoch gap is persistent, not transient out-of-order.
++const FUTURE_STALL_THRESHOLD: u32 = 5;
++
++/// #348: the new desync state after folding in one inbound frame's observation.
++struct StallStep {
++    stall: u32,
++    flagged: bool,
++    epoch_desync: bool,
++}
++
++/// Pure, testable core of the epoch-desync detector (see `handle_frame`).
++///
++/// - `committed`: this frame was a commit that advanced our epoch → we are back
++///   in sync, so the stall resets and the flag re-arms.
++/// - `buffered`: this frame was for a FUTURE epoch (buffered, no commit) → we are
++///   still behind; count it.
++/// - `epoch_desync` fires exactly once, on the frame that first crosses
++///   `FUTURE_STALL_THRESHOLD` (edge-triggered via `flagged`), so a stuck member
++///   surfaces the notice once, not on every subsequent frame.
++fn stall_step(stall: u32, flagged: bool, committed: bool, buffered: bool) -> StallStep {
++    if committed {
++        return StallStep { stall: 0, flagged: false, epoch_desync: false };
++    }
++    let stall = if buffered { stall.saturating_add(1) } else { stall };
++    let epoch_desync = stall >= FUTURE_STALL_THRESHOLD && !flagged;
++    StallStep { stall, flagged: flagged || epoch_desync, epoch_desync }
+ }
+ 
  impl std::fmt::Debug for GroupV1Convo {
-     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-         f.debug_struct("GroupV1Convo")
-@@ -46,8 +88,31 @@ impl std::fmt::Debug for GroupV1Convo {
+@@ -46,8 +126,31 @@ impl std::fmt::Debug for GroupV1Convo {
  
  impl GroupV1Convo {
      // Create a new conversation with the creator as the only participant.
@@ -1381,7 +1417,7 @@ index 6d6b64a..eec9563 100644
          let mls_group = MlsGroup::new(
              &cx.mls_provider,
              &cx.mls_identity,
-@@ -56,12 +121,17 @@ impl GroupV1Convo {
+@@ -56,12 +159,19 @@ impl GroupV1Convo {
          )
          .unwrap();
          let convo_id = hex::encode(mls_group.group_id().as_slice());
@@ -1397,10 +1433,12 @@ index 6d6b64a..eec9563 100644
 +            outer_key,
              outbound_msgs: VecDeque::new(),
 +            pending_future: VecDeque::new(),
++            future_stall: 0,
++            desync_flagged: false,
          })
      }
  
-@@ -70,21 +140,32 @@ impl GroupV1Convo {
+@@ -70,21 +180,34 @@ impl GroupV1Convo {
          cx: &mut ServiceContext<S>,
          welcome: Welcome,
      ) -> Result<Self, ChatError> {
@@ -1434,10 +1472,12 @@ index 6d6b64a..eec9563 100644
 +            outer_key,
              outbound_msgs: VecDeque::new(),
 +            pending_future: VecDeque::new(),
++            future_stall: 0,
++            desync_flagged: false,
          })
      }
  
-@@ -97,27 +178,133 @@ impl GroupV1Convo {
+@@ -97,27 +220,135 @@ impl GroupV1Convo {
              .map_err(ChatError::generic)?
              .ok_or_else(|| ChatError::NoConvo("mls group not found".into()))?;
  
@@ -1452,6 +1492,8 @@ index 6d6b64a..eec9563 100644
 +            outer_key,
              outbound_msgs: VecDeque::new(),
 +            pending_future: VecDeque::new(),
++            future_stall: 0,
++            desync_flagged: false,
          })
      }
  
@@ -1579,7 +1621,7 @@ index 6d6b64a..eec9563 100644
              .build()
      }
  
-@@ -125,7 +312,9 @@ impl GroupV1Convo {
+@@ -125,7 +356,9 @@ impl GroupV1Convo {
          MlsGroupJoinConfig::builder().build()
      }
  
@@ -1590,7 +1632,7 @@ index 6d6b64a..eec9563 100644
          let hash = Blake2b::<U6>::new()
              .chain_update("delivery_addr|")
              .chain_update(convo_id)
-@@ -134,7 +323,43 @@ impl GroupV1Convo {
+@@ -134,7 +367,43 @@ impl GroupV1Convo {
      }
  
      fn delivery_address(&self) -> String {
@@ -1635,7 +1677,7 @@ index 6d6b64a..eec9563 100644
      }
  
      /// Fetch a signer's KeyPackage from the registry. Members are signer
-@@ -165,6 +390,23 @@ impl GroupV1Convo {
+@@ -165,6 +434,23 @@ impl GroupV1Convo {
          content: &[u8],
          cx: &mut ServiceContext<S>,
      ) -> Result<(), ChatError> {
@@ -1659,7 +1701,7 @@ index 6d6b64a..eec9563 100644
          let sender_id = cx.mls_identity.id().as_str();
          let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
          let wire = reliable.encode_to_vec();
-@@ -172,37 +414,43 @@ impl GroupV1Convo {
+@@ -172,37 +458,43 @@ impl GroupV1Convo {
          let mls_message_out = self
              .mls_group
              .create_message(&cx.mls_provider, &cx.mls_identity, &wire)
@@ -1723,7 +1765,7 @@ index 6d6b64a..eec9563 100644
          cx.ds
              .publish(env)
              .map_err(|e| ChatError::Delivery(e.to_string()))
-@@ -215,6 +463,102 @@ impl Identified for GroupV1Convo {
+@@ -215,6 +507,110 @@ impl Identified for GroupV1Convo {
      }
  }
  
@@ -1741,6 +1783,7 @@ index 6d6b64a..eec9563 100644
 +        cx: &mut ServiceContext<S>,
 +        bytes: &[u8],
 +        committed: &mut bool,
++        buffered_future: &mut bool,
 +    ) -> Result<Option<Content>, ChatError> {
 +        let mls_message = MlsMessageIn::tls_deserialize_exact_bytes(bytes)
 +            .map_err(ChatError::generic)?;
@@ -1756,6 +1799,10 @@ index 6d6b64a..eec9563 100644
 +        if msg_epoch > cur {
 +            // Future epoch: the commit that advances us here hasn't been applied
 +            // yet (out-of-order delivery). Buffer and reprocess after it lands.
++            // #348: signal to the caller that THIS inbound frame stalled at a
++            // future epoch, so a persistent stall (never a real commit) can be
++            // distinguished from transient out-of-order and surfaced as desync.
++            *buffered_future = true;
 +            self.buffer_future(bytes.to_vec());
 +            return Ok(None);
 +        }
@@ -1808,7 +1855,10 @@ index 6d6b64a..eec9563 100644
 +            let before = recovered.len();
 +            let mut committed_again = false;
 +            for bytes in batch {
-+                if let Some(c) = self.process_frame(cx, &bytes, &mut committed_again)? {
++                // #348: pass a throwaway for `buffered_future` — frames that are
++                // STILL in the future at drain time must not count toward the
++                // stall (they are re-buffered, not a fresh inbound stall).
++                if let Some(c) = self.process_frame(cx, &bytes, &mut committed_again, &mut false)? {
 +                    recovered.push(c);
 +                }
 +                // future frames are re-buffered by process_frame; past ones dropped
@@ -1826,7 +1876,7 @@ index 6d6b64a..eec9563 100644
  impl<S: ExternalServices> Convo<S> for GroupV1Convo {
      fn send_content(
          &mut self,
-@@ -224,6 +568,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+@@ -224,6 +620,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
          self.send_message(content, cx)
      }
  
@@ -1841,7 +1891,7 @@ index 6d6b64a..eec9563 100644
      fn handle_frame(
          &mut self,
          cx: &mut ServiceContext<S>,
-@@ -246,48 +598,23 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+@@ -246,55 +650,47 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
              return Ok(ConvoOutcome::empty(self.convo_id.to_string()));
          }
  
@@ -1861,9 +1911,28 @@ index 6d6b64a..eec9563 100644
 -            .mls_group
 -            .process_message(&cx.mls_provider, protocol_message)
 -            .map_err(ChatError::generic)?;
--
++        // #289: past → dropped, future → buffered, current → processed. A future
++        // frame no longer errors ("epoch differs") and is no longer lost.
++        let mut committed = false;
++        let mut buffered = false;
++        let content = self.process_frame(cx, bytes.as_ref(), &mut committed, &mut buffered)?;
++
++        // A commit advanced the epoch — reprocess any buffered future-epoch frames
++        // that are now applicable and surface the recovered messages.
++        let extra = if committed {
++            self.drain_pending(cx)?
++        } else {
++            Vec::new()
++        };
+ 
 -        let cred_bytes = processed.credential().serialized_content().to_vec();
--
++        // #348: fold this frame's (committed, buffered) observation into the stall
++        // state; `epoch_desync` is edge-triggered once we cross the threshold.
++        let step = stall_step(self.future_stall, self.desync_flagged, committed, buffered);
++        self.future_stall = step.stall;
++        self.desync_flagged = step.flagged;
++        let epoch_desync = step.epoch_desync;
+ 
 -        let content = match processed.into_content() {
 -            ProcessedMessageContent::ApplicationMessage(msg) => {
 -                let reliable = ReliablePayload::decode(msg.into_bytes().as_slice())?;
@@ -1883,27 +1952,16 @@ index 6d6b64a..eec9563 100644
 -                // TODO: (P2) Log unknown message type
 -                None
 -            }
-+        // #289: past → dropped, future → buffered, current → processed. A future
-+        // frame no longer errors ("epoch differs") and is no longer lost.
-+        let mut committed = false;
-+        let content = self.process_frame(cx, bytes.as_ref(), &mut committed)?;
-+
-+        // A commit advanced the epoch — reprocess any buffered future-epoch frames
-+        // that are now applicable and surface the recovered messages.
-+        let extra = if committed {
-+            self.drain_pending(cx)?
-+        } else {
-+            Vec::new()
-         };
-+
+-        };
          Ok(ConvoOutcome {
              convo_id: self.id().to_string(),
              content,
 +            extra,
              members_changed: false,
++            epoch_desync,
          })
      }
-@@ -295,6 +622,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+ 
      fn wakeup(&mut self, _: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
          Ok(ConvoOutcome::empty(self.id().to_string()))
      }
@@ -1918,7 +1976,7 @@ index 6d6b64a..eec9563 100644
  }
  
  impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
-@@ -307,6 +642,16 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -307,6 +703,16 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
          cx: &mut ServiceContext<S>,
          members: &[IdentIdRef],
      ) -> Result<(), ChatError> {
@@ -1935,7 +1993,7 @@ index 6d6b64a..eec9563 100644
          if members.len() > 50 {
              // This is a temporary limit that originates from the the De-MLS epoch time.
              return Err(ChatError::Protocol(
-@@ -322,6 +667,9 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -322,6 +728,9 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
              keypkgs.push(self.key_package_for_signer(ident, &cx.mls_provider, &cx.registry)?);
          }
  
@@ -1945,7 +2003,7 @@ index 6d6b64a..eec9563 100644
          let (commit, welcome, _group_info) = self
              .mls_group
              .add_members(
-@@ -329,11 +677,11 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -329,11 +738,11 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
                  &cx.mls_identity,
                  keypkgs.iter().as_slice(),
              )
@@ -1959,7 +2017,7 @@ index 6d6b64a..eec9563 100644
  
          // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
          for signer_id in members {
-@@ -353,6 +701,114 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -353,6 +762,181 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
      }
  
      fn metadata(&self) -> Option<ConvoMetadata> {
@@ -2073,10 +2131,77 @@ index 6d6b64a..eec9563 100644
 +            None,
 +            "a nonce-only blob (no ciphertext/tag) must unseal to None"
 +        );
++    }
++}
++
++// #348: the epoch-desync detector's decision logic (`stall_step`) in isolation —
++// no MLS/group state. Locks the two properties that matter: transient
++// out-of-order does NOT trip it, and a persistent gap fires exactly once.
++#[cfg(test)]
++mod stall_tests {
++    use super::{stall_step, FUTURE_STALL_THRESHOLD};
++
++    // Feed a sequence of (committed, buffered) observations; return the count of
++    // frames on which epoch_desync fired, plus the final (stall, flagged).
++    fn run(seq: &[(bool, bool)]) -> (u32, (u32, bool)) {
++        let mut stall = 0u32;
++        let mut flagged = false;
++        let mut fired = 0u32;
++        for &(committed, buffered) in seq {
++            let s = stall_step(stall, flagged, committed, buffered);
++            stall = s.stall;
++            flagged = s.flagged;
++            if s.epoch_desync {
++                fired += 1;
++            }
++        }
++        (fired, (stall, flagged))
++    }
++
++    // Transient out-of-order: a few future frames, then the bridging commit lands
++    // BEFORE the threshold → never fires, and the commit resets the stall.
++    #[test]
++    fn transient_reorder_never_fires() {
++        let n = (FUTURE_STALL_THRESHOLD - 1) as usize;
++        let mut seq = vec![(false, true); n]; // n future-buffered (< threshold)
++        seq.push((true, false)); // commit advances us
++        let (fired, (stall, flagged)) = run(&seq);
++        assert_eq!(fired, 0, "transient reorder must not flag desync");
++        assert_eq!((stall, flagged), (0, false), "commit resets the stall");
++    }
++
++    // Persistent gap: threshold future frames with no commit → fires EXACTLY once
++    // (edge-triggered), and stays quiet on further stalled frames.
++    #[test]
++    fn persistent_gap_fires_once() {
++        let extra = 3usize;
++        let seq = vec![(false, true); FUTURE_STALL_THRESHOLD as usize + extra];
++        let (fired, (_stall, flagged)) = run(&seq);
++        assert_eq!(fired, 1, "desync must fire exactly once at the threshold");
++        assert!(flagged, "stays flagged after firing (no re-spam)");
++    }
++
++    // Recovery: after firing, a commit re-arms; a second persistent gap fires again.
++    #[test]
++    fn recovers_and_can_refire_after_commit() {
++        let gap = || vec![(false, true); FUTURE_STALL_THRESHOLD as usize];
++        let mut seq = gap();
++        seq.push((true, false)); // recovered (re-add / caught-up commit)
++        seq.extend(gap()); // desync again later
++        let (fired, _) = run(&seq);
++        assert_eq!(fired, 2, "a commit re-arms the edge trigger");
++    }
++
++    // Frames that are neither commit nor future-buffer (normal current-epoch
++    // traffic) don't move the counter.
++    #[test]
++    fn current_epoch_frames_are_inert() {
++        let (fired, (stall, _)) = run(&[(false, false); 20]);
++        assert_eq!((fired, stall), (0, 0), "in-sync traffic never stalls");
      }
  }
 diff --git a/core/conversations/src/conversation/group_v2.rs b/core/conversations/src/conversation/group_v2.rs
-index c547e5a..335f523 100644
+index c547e5a..8bb56ad 100644
 --- a/core/conversations/src/conversation/group_v2.rs
 +++ b/core/conversations/src/conversation/group_v2.rs
 @@ -14,7 +14,8 @@ use de_mls::protos::de_mls::messages::v1::{
@@ -2135,14 +2260,24 @@ index c547e5a..335f523 100644
      fn members(&self) -> Result<Vec<Vec<u8>>, ChatError> {
          // Guarantee the local member is listed so callers see the full roster.
          let mut members = self.conversation.members()?;
-@@ -484,6 +517,7 @@ impl GroupV2Convo {
+@@ -484,7 +517,17 @@ impl GroupV2Convo {
          ConvoOutcome {
              convo_id: self.convo_id.clone(),
              content,
 +            extra: Vec::new(),
              members_changed,
++            // #348 TODO: GroupV2 epoch-desync detection is DEFERRED. de-mls
++            // decodes the inbound wrapper internally (private `decode_inbound`)
++            // and drops past/future frames silently; `Conversation` exposes only
++            // `epoch_and_retry()`, with no public way to peek an inbound frame's
++            // MLS epoch BEFORE `process_inbound` consumes it. Replicating the
++            // GroupV1 stall counter here would need a de-mls API to surface the
++            // rejected-frame epoch (or a `DispatchOutcome` future-epoch variant).
++            // GroupV1 is the shipped, must-work path; leave this false for now.
++            epoch_desync: false,
          }
      }
+ }
 diff --git a/core/conversations/src/conversation/mls_extensions.rs b/core/conversations/src/conversation/mls_extensions.rs
 index a5b4033..53c41b1 100644
 --- a/core/conversations/src/conversation/mls_extensions.rs
@@ -2900,10 +3035,10 @@ index f55f60f..0776bf8 100644
      fn invite_user<DS: DeliveryService>(
          &self,
 diff --git a/core/conversations/src/outcomes.rs b/core/conversations/src/outcomes.rs
-index 18877e7..df8271c 100644
+index 18877e7..0dbda4f 100644
 --- a/core/conversations/src/outcomes.rs
 +++ b/core/conversations/src/outcomes.rs
-@@ -22,6 +22,11 @@ pub struct Content {
+@@ -22,7 +22,18 @@ pub struct Content {
  pub struct ConvoOutcome {
      pub convo_id: ConversationId,
      pub content: Option<Content>,
@@ -2913,17 +3048,26 @@ index 18877e7..df8271c 100644
 +    /// were reprocessed. Normally empty.
 +    pub extra: Vec<Content>,
      pub members_changed: bool,
++    /// #348: the local member observed it is stuck behind the group's MLS epoch
++    /// and cannot bridge the gap in-band (a persistent future-epoch stall, not a
++    /// transient out-of-order blip). Edge-triggered: set once when the stall is
++    /// first detected. The application surfaces a "you've fallen out of sync"
++    /// notice so the user can ask to be re-added.
++    pub epoch_desync: bool,
  }
  
-@@ -30,6 +35,7 @@ impl ConvoOutcome {
+ impl ConvoOutcome {
+@@ -30,7 +41,9 @@ impl ConvoOutcome {
          Self {
              convo_id,
              content: None,
 +            extra: Vec::new(),
              members_changed: false,
++            epoch_desync: false,
          }
      }
-@@ -78,7 +84,7 @@ impl ConversationClass {
+ }
+@@ -78,7 +91,7 @@ impl ConversationClass {
      /// `Unknown(_)` yields `None`.
      pub fn from_kind(kind: &ConversationKind) -> Option<Self> {
          match kind {
@@ -4312,7 +4456,7 @@ index d05b05a..539a451 100644
 +{
 +}
 diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
-index a684ecd..da8e151 100644
+index a684ecd..9af3296 100644
 --- a/crates/generic-chat/src/client.rs
 +++ b/crates/generic-chat/src/client.rs
 @@ -6,8 +6,8 @@ use components::{ThreadedWakeupService, WakeupEvent};
@@ -4582,15 +4726,17 @@ index a684ecd..da8e151 100644
                  }
              }
              recv(wakeup_events) -> msg => {
-@@ -527,6 +653,7 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
+@@ -527,7 +653,9 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
      let ConvoOutcome {
          convo_id,
          content,
 +        extra,
          members_changed,
++        epoch_desync,
      } = outcome;
      let convo_id: Arc<str> = Arc::from(convo_id);
-@@ -540,6 +667,17 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
+     let mut events = Vec::new();
+@@ -540,8 +668,28 @@ fn convo_events(outcome: ConvoOutcome, directory: &impl AccountDirectory) -> Vec
              sender,
          });
      }
@@ -4606,8 +4752,20 @@ index a684ecd..da8e151 100644
 +        }
 +    }
      if members_changed {
-         events.push(Event::ConversationMembersChanged { convo_id });
+-        events.push(Event::ConversationMembersChanged { convo_id });
++        events.push(Event::ConversationMembersChanged {
++            convo_id: Arc::clone(&convo_id),
++        });
++    }
++    // #348: the local member fell behind the group's epoch and cannot recover
++    // in-band — surface it so the UI can prompt the user to ask to be re-added.
++    if epoch_desync {
++        events.push(Event::ConversationDesynced {
++            convo_id: Arc::clone(&convo_id),
++        });
      }
+     events
+ }
 diff --git a/crates/generic-chat/src/delegate.rs b/crates/generic-chat/src/delegate.rs
 index a8ea88c..45408fa 100644
 --- a/crates/generic-chat/src/delegate.rs
@@ -4629,6 +4787,22 @@ index a8ea88c..45408fa 100644
      pub fn public_key(&self) -> &Ed25519VerifyingKey {
          &self.verifying_key
      }
+diff --git a/crates/generic-chat/src/event.rs b/crates/generic-chat/src/event.rs
+index 4618e02..1ad0ef7 100644
+--- a/crates/generic-chat/src/event.rs
++++ b/crates/generic-chat/src/event.rs
+@@ -42,6 +42,11 @@ pub enum Event {
+     ConversationMembersChanged {
+         convo_id: Arc<str>,
+     },
++    /// #348: the local member is stuck on an old epoch and cannot recover
++    /// in-band; the user should ask to be re-added to the group.
++    ConversationDesynced {
++        convo_id: Arc<str>,
++    },
+     InboundError {
+         message: String,
+     },
 diff --git a/crates/generic-chat/tests/saro_and_raya.rs b/crates/generic-chat/tests/saro_and_raya.rs
 index 01b954f..994f015 100644
 --- a/crates/generic-chat/tests/saro_and_raya.rs

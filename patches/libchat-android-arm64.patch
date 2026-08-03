@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 280e23c..159788c 100644
+index 280e23c..ceddcd5 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -65,31 +65,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -69,7 +69,7 @@ index 280e23c..159788c 100644
  dependencies = [
 - "alloy-dyn-abi",
 - "alloy-json-abi",
-- "alloy-primitives",
+  "alloy-primitives",
 - "alloy-rlp",
 - "alloy-sol-types",
 -]
@@ -81,7 +81,7 @@ index 280e23c..159788c 100644
 -checksum = "a475bb02d9cef2dbb99065c1664ab3fe1f9352e21d6d5ed3f02cdbfc06ed1abc"
 -dependencies = [
 - "alloy-json-abi",
-  "alloy-primitives",
+- "alloy-primitives",
 - "alloy-sol-type-parser",
 - "alloy-sol-types",
 - "itoa",
@@ -495,7 +495,22 @@ index 280e23c..159788c 100644
  [[package]]
  name = "hashbrown"
  version = "0.17.0"
-@@ -3113,65 +2793,6 @@ version = "1.0.18"
+@@ -3057,10 +2737,14 @@ dependencies = [
+ name = "integration_tests_core"
+ version = "0.1.0"
+ dependencies = [
++ "blake2",
++ "chat-proto",
+  "chat-sqlite",
+  "components",
+  "crypto",
++ "hex",
+  "libchat",
++ "prost",
+  "shared-traits",
+  "storage",
+  "tempfile",
+@@ -3113,65 +2797,6 @@ version = "1.0.18"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
  
@@ -561,7 +576,15 @@ index 280e23c..159788c 100644
  [[package]]
  name = "js-sys"
  version = "0.3.95"
-@@ -3544,6 +3165,18 @@ dependencies = [
+@@ -3258,6 +2883,7 @@ dependencies = [
+  "alloy",
+  "base64",
+  "blake2",
++ "chacha20poly1305",
+  "chat-proto",
+  "chat-sqlite",
+  "components",
+@@ -3544,6 +3170,18 @@ dependencies = [
   "rand 0.9.4",
  ]
  
@@ -580,7 +603,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "libm"
  version = "0.2.16"
-@@ -3617,6 +3250,7 @@ version = "0.1.0"
+@@ -3617,6 +3255,7 @@ version = "0.1.0"
  dependencies = [
   "components",
   "crossbeam-channel",
@@ -588,7 +611,7 @@ index 280e23c..159788c 100644
   "embedded-logos-delivery",
   "libchat",
   "logos-account",
-@@ -3665,15 +3299,6 @@ dependencies = [
+@@ -3665,15 +3304,6 @@ dependencies = [
   "hashbrown 0.15.5",
  ]
  
@@ -604,7 +627,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "lru-slab"
  version = "0.1.2"
-@@ -3798,27 +3423,6 @@ dependencies = [
+@@ -3798,27 +3428,6 @@ dependencies = [
   "libc",
  ]
  
@@ -632,7 +655,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "nybbles"
  version = "0.4.8"
-@@ -4074,12 +3678,6 @@ dependencies = [
+@@ -4074,12 +3683,6 @@ dependencies = [
   "tls_codec",
  ]
  
@@ -645,7 +668,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "openssl-src"
  version = "300.6.0+3.6.2"
-@@ -4223,38 +3821,12 @@ dependencies = [
+@@ -4223,38 +3826,12 @@ dependencies = [
   "indexmap 2.14.0",
  ]
  
@@ -684,7 +707,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "pkcs8"
  version = "0.10.2"
-@@ -4515,7 +4087,6 @@ version = "0.11.14"
+@@ -4515,7 +4092,6 @@ version = "0.11.14"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
  dependencies = [
@@ -692,7 +715,7 @@ index 280e23c..159788c 100644
   "bytes",
   "getrandom 0.3.4",
   "lru-slab",
-@@ -4691,9 +4262,9 @@ dependencies = [
+@@ -4691,9 +4267,9 @@ dependencies = [
   "indoc",
   "instability",
   "itertools 0.13.0",
@@ -704,7 +727,7 @@ index 280e23c..159788c 100644
   "unicode-segmentation",
   "unicode-truncate",
   "unicode-width 0.2.0",
-@@ -4823,43 +4394,6 @@ dependencies = [
+@@ -4823,43 +4399,6 @@ dependencies = [
   "webpki-roots",
  ]
  
@@ -748,7 +771,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "rfc6979"
  version = "0.4.0"
-@@ -5045,7 +4579,6 @@ version = "0.23.40"
+@@ -5045,7 +4584,6 @@ version = "0.23.40"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
  dependencies = [
@@ -756,7 +779,7 @@ index 280e23c..159788c 100644
   "once_cell",
   "ring",
   "rustls-pki-types",
-@@ -5054,18 +4587,6 @@ dependencies = [
+@@ -5054,18 +4592,6 @@ dependencies = [
   "zeroize",
  ]
  
@@ -775,7 +798,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "rustls-pki-types"
  version = "1.14.1"
-@@ -5076,40 +4597,12 @@ dependencies = [
+@@ -5076,40 +4602,12 @@ dependencies = [
   "zeroize",
  ]
  
@@ -816,7 +839,7 @@ index 280e23c..159788c 100644
   "ring",
   "rustls-pki-types",
   "untrusted",
-@@ -5139,24 +4632,6 @@ version = "1.0.23"
+@@ -5139,24 +4637,6 @@ version = "1.0.23"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
  
@@ -841,7 +864,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "schemars"
  version = "0.9.0"
-@@ -5243,29 +4718,6 @@ dependencies = [
+@@ -5243,29 +4723,6 @@ dependencies = [
   "cc",
  ]
  
@@ -871,7 +894,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "semver"
  version = "0.11.0"
-@@ -5508,22 +4960,6 @@ version = "0.3.9"
+@@ -5508,22 +4965,6 @@ version = "0.3.9"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
  
@@ -894,7 +917,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "slab"
  version = "0.4.12"
-@@ -5591,16 +5027,7 @@ version = "0.26.3"
+@@ -5591,16 +5032,7 @@ version = "0.26.3"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
  dependencies = [
@@ -912,7 +935,7 @@ index 280e23c..159788c 100644
  ]
  
  [[package]]
-@@ -5616,18 +5043,6 @@ dependencies = [
+@@ -5616,18 +5048,6 @@ dependencies = [
   "syn 2.0.117",
  ]
  
@@ -931,7 +954,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "subtle"
  version = "2.6.1"
-@@ -5848,21 +5263,9 @@ dependencies = [
+@@ -5848,21 +5268,9 @@ dependencies = [
   "mio",
   "pin-project-lite",
   "socket2",
@@ -953,7 +976,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "tokio-rustls"
  version = "0.26.4"
-@@ -5873,31 +5276,6 @@ dependencies = [
+@@ -5873,31 +5281,6 @@ dependencies = [
   "tokio",
  ]
  
@@ -985,7 +1008,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "toml_datetime"
  version = "1.1.1+spec-1.1.0"
-@@ -6137,7 +5515,6 @@ dependencies = [
+@@ -6137,7 +5520,6 @@ dependencies = [
   "idna",
   "percent-encoding",
   "serde",
@@ -993,7 +1016,7 @@ index 280e23c..159788c 100644
  ]
  
  [[package]]
-@@ -6190,16 +5567,6 @@ dependencies = [
+@@ -6190,16 +5572,6 @@ dependencies = [
   "libc",
  ]
  
@@ -1010,7 +1033,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "want"
  version = "0.3.1"
-@@ -6322,20 +5689,6 @@ dependencies = [
+@@ -6322,20 +5694,6 @@ dependencies = [
   "semver 1.0.28",
  ]
  
@@ -1031,7 +1054,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "web-sys"
  version = "0.3.95"
-@@ -6356,15 +5709,6 @@ dependencies = [
+@@ -6356,15 +5714,6 @@ dependencies = [
   "wasm-bindgen",
  ]
  
@@ -1047,7 +1070,7 @@ index 280e23c..159788c 100644
  [[package]]
  name = "webpki-roots"
  version = "1.0.7"
-@@ -6396,15 +5740,6 @@ version = "0.4.0"
+@@ -6396,15 +5745,6 @@ version = "0.4.0"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6"
  
@@ -1099,10 +1122,10 @@ index 6f40d1c..cc9aa23 100644
      pub fn public_key(&self) -> &Ed25519VerifyingKey {
          &self.verifying_key
 diff --git a/core/conversations/Cargo.toml b/core/conversations/Cargo.toml
-index 0b3950d..c0edd01 100644
+index 0b3950d..85dfa62 100644
 --- a/core/conversations/Cargo.toml
 +++ b/core/conversations/Cargo.toml
-@@ -15,7 +15,11 @@ shared-traits = { workspace = true }
+@@ -15,8 +15,15 @@ shared-traits = { workspace = true }
  storage = { workspace = true }
  
  # External dependencies (sorted)
@@ -1113,10 +1136,14 @@ index 0b3950d..c0edd01 100644
 +# surface we don't need. See docs/build-fork-tree.md.
 +alloy = { version = "2.0", default-features = false, features = ["signer-local"] }
  base64 = "0.22"
++# #graph-hiding Phase 1: outer-encrypt the sealed envelope so the delivery node
++# cannot read the MLS framing (group_id/epoch). Already resolved in the lockfile.
++chacha20poly1305 = "0.10"
  chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "37ec98a151f6d50aab2905802ac0a896477e62ea" }
  de-mls = { git = "https://github.com/vacp2p/de-mls", rev = "2c7a8669c1492c749c02efd2c5ac45e93e4926a3"} # Expose Mls Extensions (#131)
+ double-ratchets = { path = "../double-ratchets" }
 diff --git a/core/conversations/src/conversation.rs b/core/conversations/src/conversation.rs
-index 3581eba..937e225 100644
+index 3581eba..95f90fd 100644
 --- a/core/conversations/src/conversation.rs
 +++ b/core/conversations/src/conversation.rs
 @@ -21,6 +21,22 @@ pub(crate) trait Convo<S: ExternalServices>: Identified + Send {
@@ -1142,10 +1169,43 @@ index 3581eba..937e225 100644
      /// Decrypts and processes an incoming encrypted frame.
      ///
      /// Returns the [`ConvoOutcome`] describing what the frame produced; its
-@@ -48,6 +64,16 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
+@@ -35,6 +51,24 @@ pub(crate) trait Convo<S: ExternalServices>: Identified + Send {
+     /// Advances any time-driven protocol work (de-mls consensus deadlines) and
+     /// reports what it observed, mirroring [`Self::handle_frame`].
+     fn wakeup(&mut self, service_ctx: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError>;
++
++    /// #graph-hiding Phase 1: on the single global content-topic there is no cleartext
++    /// conversation id — inbound messages carry an opaque `hint` (route_tag) and a sealed
++    /// payload. Return the inner (unsealed) EncryptedPayload bytes iff `hint` names THIS
++    /// conversation and its key opens the blob; otherwise `None`. Default: not routable
++    /// this way (only GroupV1 / its Direct delegate implement it).
++    fn try_route(&self, _hint: &str, _sealed: &[u8]) -> Option<Vec<u8>> {
++        None
++    }
++
++    /// #graph-hiding Phase 1: the opaque route_tag this conversation is addressed by
++    /// on the global topic, so `Core` can index tag → convo_id and route inbound
++    /// messages to conversations that aren't currently cached (e.g. store catch-up
++    /// into a freshly-launched app — the #211 property). `None` for kinds that don't
++    /// use the sealed global-topic path.
++    fn route_tag(&self) -> Option<String> {
++        None
++    }
+ }
+ 
+ /// Group-only operations.
+@@ -48,6 +82,24 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
      /// Each current member's MLS leaf-credential content (hex-encoded), self
      /// included.
      fn members(&self) -> Result<Vec<Vec<u8>>, ChatError>;
++
++    /// Test-only: the current MLS epoch counter, exposed so the graph-hiding
++    /// epoch-stability test can prove an epoch change actually occurred across an
++    /// add/remove. Default `0` for kinds without an MLS epoch (e.g. GroupV2).
++    #[doc(hidden)]
++    fn mls_epoch_for_test(&self) -> u64 {
++        0
++    }
 +
 +    /// Remove SELF from the group (leave). Default: unsupported — only the
 +    /// conversation kinds that model self-removal override this.
@@ -1160,10 +1220,22 @@ index 3581eba..937e225 100644
      // the return type is Option<_> to support legacy ConvoTypes which
      // are being phased out.
 diff --git a/core/conversations/src/conversation/direct_v1.rs b/core/conversations/src/conversation/direct_v1.rs
-index 8a6cb01..9dd69b2 100644
+index 8a6cb01..fb6ccda 100644
 --- a/core/conversations/src/conversation/direct_v1.rs
 +++ b/core/conversations/src/conversation/direct_v1.rs
-@@ -47,6 +47,14 @@ where
+@@ -27,6 +27,11 @@ impl DirectV1Convo {
+         inner_group.add_member(cx, members)?;
+         Ok(Self { inner_group })
+     }
++
++    // #339: S-independent route_tag accessor (delegates to the inner GroupV1).
++    pub(crate) fn graph_route_tag(&self) -> Option<String> {
++        self.inner_group.graph_route_tag()
++    }
+ }
+ 
+ impl Identified for DirectV1Convo {
+@@ -47,6 +52,14 @@ where
          self.inner_group.send_content(cx, content)
      }
  
@@ -1178,30 +1250,87 @@ index 8a6cb01..9dd69b2 100644
      fn handle_frame(
          &mut self,
          cx: &mut ServiceContext<S>,
+@@ -61,4 +74,13 @@ where
+     ) -> Result<crate::ConvoOutcome, ChatError> {
+         self.inner_group.wakeup(service_ctx)
+     }
++
++    fn try_route(&self, hint: &str, sealed: &[u8]) -> Option<Vec<u8>> {
++        // #graph-hiding Phase 1: a 1:1 delegates routing to its inner GroupV1.
++        self.inner_group.route_and_unseal(hint, sealed)
++    }
++
++    fn route_tag(&self) -> Option<String> {
++        Convo::<S>::route_tag(&self.inner_group)
++    }
+ }
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
-index 6d6b64a..1ddb7ee 100644
+index 6d6b64a..eec9563 100644
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
-@@ -5,6 +5,7 @@
- use blake2::{Blake2b, Digest, digest::consts::U6};
+@@ -2,9 +2,18 @@
+ /// Properties:
+ ///     - Harvest Now Decrypt Later (HNDL) protection provided by XWING
+ ///     - Multiple
+-use blake2::{Blake2b, Digest, digest::consts::U6};
++use blake2::{
++    Blake2b, Digest,
++    digest::consts::{U6, U16, U32},
++};
++use chacha20poly1305::{
++    ChaCha20Poly1305, Key, Nonce,
++    aead::{Aead, KeyInit},
++};
++use rand::RngCore;
  use chat_proto::logoschat::encryption::{EncryptedPayload, Plaintext, encrypted_payload};
  use chat_proto::logoschat::reliability::ReliablePayload;
 +use openmls::extensions::{Extension, Extensions, UnknownExtension};
  use openmls::prelude::tls_codec::Deserialize;
  use openmls::prelude::*;
  use prost::Message as _;
-@@ -13,6 +14,9 @@ use std::collections::VecDeque;
+@@ -13,6 +22,9 @@ use std::collections::VecDeque;
  use tracing::debug;
  
  use crate::conversation::ConversationIdRef;
 +use crate::conversation::mls_extensions::{
-+    ConvoMetaInfo, GROUP_METADATA_EXTENSION_TYPE, capabilities_with_group_metadata,
++    ConvoMetaInfo, GROUP_METADATA_EXTENSION_TYPE, GROUP_SECRET_EXTENSION_TYPE, capabilities_for,
 +};
  use crate::inbox_v2::MlsProvider;
  use crate::service_context::{ExternalServices, ServiceContext};
  
-@@ -33,8 +37,18 @@ pub struct GroupV1Convo {
+@@ -23,18 +35,48 @@ use crate::{
+     conversation::{ChatError, Convo, GroupConvo, Identified},
+     outcomes::{Content, ConvoOutcome},
+     service_traits::KeyPackageProvider,
+-    types::AddressedEncryptedPayload,
+ };
+ 
+ const OUTBOUND_HASH_CACHE_SIZE: usize = 25;
+ 
++// #graph-hiding Phase 1: single global content-topic for ALL conversations, so the
++// delivery node sees neither a per-conversation topic nor a per-user subscription set.
++const GLOBAL_TOPIC: &str = "peers-global-v1";
++// MLS-exporter labels: outer_key seals the MLS framing; route_tag replaces the
++// cleartext group-id hint. Both members derive identical values at the same epoch.
++const OUTER_WRAP_LABEL: &str = "peers/outer-wrap-v1";
++const ROUTE_TAG_LABEL: &str = "peers/route-tag-v1";
++const OUTER_NONCE_LEN: usize = 12;
++// Length of the random, epoch-stable per-conversation graph secret (group-context ext).
++const GRAPH_SECRET_LEN: usize = 32;
++
+ pub struct GroupV1Convo {
+     mls_group: MlsGroup,
      convo_id: String,
++    // #graph-hiding Phase 1: ALL conversations share one global content-topic
++    // (GLOBAL_TOPIC), so the node sees no per-convo topic and no subscription set.
++    // Routing + confidentiality of the MLS framing come from two MLS-exporter-derived,
++    // member-only values, computed at construction (this epoch — same settled-epoch
++    // caveat as #336):
++    //   route_tag = opaque `conversation_hint` replacing hex(group_id); recipient matches it.
++    //   outer_key = AEAD key that seals the MLS message bytes so the node can't read
++    //               the cleartext group_id/epoch in the MLS framing.
++    route_tag: String,
++    outer_key: [u8; 32],
      // Cache outbound message Id's to filter out re-entrant messages
      outbound_msgs: VecDeque<String>,
 +    // #289: frames received for a FUTURE epoch (their commit not yet applied,
@@ -1219,7 +1348,7 @@ index 6d6b64a..1ddb7ee 100644
  impl std::fmt::Debug for GroupV1Convo {
      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
          f.debug_struct("GroupV1Convo")
-@@ -46,8 +60,31 @@ impl std::fmt::Debug for GroupV1Convo {
+@@ -46,8 +88,31 @@ impl std::fmt::Debug for GroupV1Convo {
  
  impl GroupV1Convo {
      // Create a new conversation with the creator as the only participant.
@@ -1252,15 +1381,26 @@ index 6d6b64a..1ddb7ee 100644
          let mls_group = MlsGroup::new(
              &cx.mls_provider,
              &cx.mls_identity,
-@@ -62,6 +99,7 @@ impl GroupV1Convo {
+@@ -56,12 +121,17 @@ impl GroupV1Convo {
+         )
+         .unwrap();
+         let convo_id = hex::encode(mls_group.group_id().as_slice());
+-        Self::subscribe(&mut cx.ds, &convo_id)?;
++        let (outer_key, route_tag) = Self::seal_material(&mls_group);
++        // Phase 1: every convo subscribes the single global topic (idempotent).
++        Self::subscribe(&mut cx.ds, GLOBAL_TOPIC)?;
+ 
+         Ok(Self {
              mls_group,
              convo_id,
++            route_tag,
++            outer_key,
              outbound_msgs: VecDeque::new(),
 +            pending_future: VecDeque::new(),
          })
      }
  
-@@ -70,13 +108,19 @@ impl GroupV1Convo {
+@@ -70,21 +140,32 @@ impl GroupV1Convo {
          cx: &mut ServiceContext<S>,
          welcome: Welcome,
      ) -> Result<Self, ChatError> {
@@ -1282,53 +1422,164 @@ index 6d6b64a..1ddb7ee 100644
 +                .map_err(ChatError::generic)?;
  
          let convo_id = hex::encode(mls_group.group_id().as_slice());
-         Self::subscribe(&mut cx.ds, &convo_id)?;
-@@ -85,6 +129,7 @@ impl GroupV1Convo {
+-        Self::subscribe(&mut cx.ds, &convo_id)?;
++        let (outer_key, route_tag) = Self::seal_material(&mls_group);
++        // Phase 1: every convo subscribes the single global topic (idempotent).
++        Self::subscribe(&mut cx.ds, GLOBAL_TOPIC)?;
+ 
+         Ok(Self {
              mls_group,
              convo_id,
++            route_tag,
++            outer_key,
              outbound_msgs: VecDeque::new(),
 +            pending_future: VecDeque::new(),
          })
      }
  
-@@ -103,6 +148,7 @@ impl GroupV1Convo {
+@@ -97,27 +178,133 @@ impl GroupV1Convo {
+             .map_err(ChatError::generic)?
+             .ok_or_else(|| ChatError::NoConvo("mls group not found".into()))?;
+ 
+-        Self::subscribe(&mut cx.ds, &convo_id)?;
++        let (outer_key, route_tag) = Self::seal_material(&mls_group);
++        Self::subscribe(&mut cx.ds, GLOBAL_TOPIC)?;
+ 
+         Ok(GroupV1Convo {
              mls_group,
              convo_id,
++            route_tag,
++            outer_key,
              outbound_msgs: VecDeque::new(),
 +            pending_future: VecDeque::new(),
          })
      }
  
-@@ -114,18 +160,34 @@ impl GroupV1Convo {
+-    // Configure the delivery service to listen for the required delivery addresses.
+-    fn subscribe(ds: &mut impl DeliveryService, convo_id: &str) -> Result<(), ChatError> {
+-        ds.subscribe(&Self::delivery_address_from_id(convo_id))
+-            .map_err(ChatError::generic)?;
++    // Configure the delivery service to listen on an already-derived topic.
++    fn subscribe(ds: &mut impl DeliveryService, topic: &str) -> Result<(), ChatError> {
++        ds.subscribe(topic).map_err(ChatError::generic)?;
+ 
          Ok(())
      }
  
 -    fn mls_create_config<S: ExternalServices>(cx: &mut ServiceContext<S>) -> MlsGroupCreateConfig {
 -        MlsGroupCreateConfig::builder()
++    // #graph-hiding Phase 1: derive the (outer_key, route_tag) pair from the MLS
++    // exporter at the current epoch. Both members compute identical values while at
++    // the same epoch. pub(crate) so `Core::assemble` can recompute after loading a
++    // persisted group (it now only needs the route_tag/outer_key, not a per-convo topic).
++    // #graph-hiding Phase 1: the single global content-topic every conversation shares.
++    pub(crate) fn global_topic() -> &'static str {
++        GLOBAL_TOPIC
++    }
++
++    // #graph-hiding Phase 1b: derive (outer_key, route_tag) from the epoch-STABLE
++    // group-context secret (member-only, identical across epochs + for late joiners),
++    // NOT the per-epoch exporter — so routing/unsealing survive epoch skew (the wall
++    // that killed the exporter spikes).
++    pub(crate) fn seal_material(mls_group: &MlsGroup) -> ([u8; 32], String) {
++        let secret = Self::conversation_secret(mls_group);
++        let mut key = [0u8; 32];
++        key.copy_from_slice(
++            &Blake2b::<U32>::new()
++                .chain_update(OUTER_WRAP_LABEL)
++                .chain_update(&secret)
++                .finalize(),
++        );
++        let tag = hex::encode(
++            Blake2b::<U16>::new()
++                .chain_update(ROUTE_TAG_LABEL)
++                .chain_update(&secret)
++                .finalize(),
++        );
++        (key, tag)
++    }
++
++    // Read the epoch-stable graph secret from the group context. Absent only on
++    // pre-Phase-1b groups (created before this change): those fall back to a value
++    // derived from the group_id so construction never fails (they simply won't
++    // interop with Phase-1b peers, which is expected — it's a flag-day change).
++    fn conversation_secret(mls_group: &MlsGroup) -> Vec<u8> {
++        mls_group
++            .extensions()
++            .iter()
++            .find_map(|ext| match ext {
++                Extension::Unknown(t, UnknownExtension(bytes))
++                    if *t == GROUP_SECRET_EXTENSION_TYPE =>
++                {
++                    Some(bytes.clone())
++                }
++                _ => None,
++            })
++            .unwrap_or_else(|| mls_group.group_id().as_slice().to_vec())
++    }
++
++    // #graph-hiding Phase 1: seal `plaintext` (the encoded EncryptedPayload) under the
++    // per-epoch outer key. Wire = [12-byte random nonce][ChaCha20-Poly1305 ciphertext].
++    // Hides the MLS framing (group_id/epoch) from the delivery node.
++    fn seal(outer_key: &[u8; 32], plaintext: &[u8]) -> Vec<u8> {
++        let cipher = ChaCha20Poly1305::new(Key::from_slice(outer_key));
++        let mut nonce_bytes = [0u8; OUTER_NONCE_LEN];
++        rand::rng().fill_bytes(&mut nonce_bytes);
++        let nonce = Nonce::from_slice(&nonce_bytes);
++        let ct = cipher
++            .encrypt(nonce, plaintext)
++            .expect("chacha20poly1305 seal");
++        let mut out = Vec::with_capacity(OUTER_NONCE_LEN + ct.len());
++        out.extend_from_slice(&nonce_bytes);
++        out.extend_from_slice(&ct);
++        out
++    }
++
++    // Inverse of `seal`. Returns None if this key doesn't open the blob (wrong convo
++    // or wrong epoch) — the caller treats that as "not for this conversation".
++    fn unseal(outer_key: &[u8; 32], sealed: &[u8]) -> Option<Vec<u8>> {
++        if sealed.len() < OUTER_NONCE_LEN {
++            return None;
++        }
++        let (nonce_bytes, ct) = sealed.split_at(OUTER_NONCE_LEN);
++        let cipher = ChaCha20Poly1305::new(Key::from_slice(outer_key));
++        cipher.decrypt(Nonce::from_slice(nonce_bytes), ct).ok()
++    }
++
 +    fn mls_create_config<S: ExternalServices>(
 +        cx: &mut ServiceContext<S>,
 +        meta: Option<(&str, &str)>,
 +    ) -> MlsGroupCreateConfig {
-+        let mut builder = MlsGroupCreateConfig::builder()
++        let builder = MlsGroupCreateConfig::builder()
              .ciphersuite(cx.mls_provider.crypto().supported_ciphersuites()[0])
 -            .use_ratchet_tree_extension(true) // This is handy for now, until there is central store for this data
--            .build()
 +            .use_ratchet_tree_extension(true); // This is handy for now, until there is central store for this data
++
++        // #graph-hiding Phase 1b: every conversation (1:1 and group) carries a random,
++        // epoch-stable secret in its group context; the sealed-envelope route_tag +
++        // outer_key derive from it (see `seal_material`). A named group additionally
++        // carries its metadata extension.
++        let mut secret = [0u8; GRAPH_SECRET_LEN];
++        rand::rng().fill_bytes(&mut secret);
++        let mut exts = vec![Extension::Unknown(
++            GROUP_SECRET_EXTENSION_TYPE,
++            UnknownExtension(secret.to_vec()),
++        )];
 +        if let Some((name, desc)) = meta {
-+            let info = ConvoMetaInfo::new(name, desc);
-+            let extensions = Extensions::from_vec(vec![Extension::Unknown(
++            exts.push(Extension::Unknown(
 +                GROUP_METADATA_EXTENSION_TYPE,
-+                UnknownExtension(info.to_extension_bytes()),
-+            )])
-+            .expect("failed to build group metadata extensions");
-+            builder = builder
-+                .capabilities(capabilities_with_group_metadata())
-+                .with_group_context_extensions(extensions);
++                UnknownExtension(ConvoMetaInfo::new(name, desc).to_extension_bytes()),
++            ));
 +        }
-+        builder.build()
++        let extensions =
++            Extensions::from_vec(exts).expect("failed to build group context extensions");
++        builder
++            .capabilities(capabilities_for(meta.is_some()))
++            .with_group_context_extensions(extensions)
+             .build()
      }
  
-     fn mls_join_config() -> MlsGroupJoinConfig {
+@@ -125,7 +312,9 @@ impl GroupV1Convo {
          MlsGroupJoinConfig::builder().build()
      }
  
@@ -1339,10 +1590,31 @@ index 6d6b64a..1ddb7ee 100644
          let hash = Blake2b::<U6>::new()
              .chain_update("delivery_addr|")
              .chain_update(convo_id)
-@@ -137,6 +199,25 @@ impl GroupV1Convo {
-         Self::delivery_address_from_id(&self.convo_id)
+@@ -134,7 +323,43 @@ impl GroupV1Convo {
      }
  
+     fn delivery_address(&self) -> String {
+-        Self::delivery_address_from_id(&self.convo_id)
++        // Phase 1: publish on the single global topic (same one everyone subscribes).
++        GLOBAL_TOPIC.to_string()
++    }
++
++    // #graph-hiding Phase 1: shared impl behind the `Convo::try_route` trait method
++    // (below) and the DirectV1 delegate. Does the opaque `hint` name THIS conversation,
++    // and if so can we open the sealed blob? Returns the inner EncryptedPayload bytes.
++    pub(crate) fn route_and_unseal(&self, hint: &str, sealed: &[u8]) -> Option<Vec<u8>> {
++        if hint != self.route_tag {
++            return None;
++        }
++        Self::unseal(&self.outer_key, sealed)
++    }
++
++    // #339: S-independent accessor for the persisted route_tag (the `Convo::route_tag`
++    // trait method is generic over S, which can't be inferred at persistence sites).
++    pub(crate) fn graph_route_tag(&self) -> Option<String> {
++        Some(self.route_tag.clone())
++    }
++
 +    /// Read the group's name/description out of the MLS group-context extension,
 +    /// if present. `None` for a plain group (e.g. the DirectV1 1-1 delegate,
 +    /// which is created without the extension) — that absence is also the signal
@@ -1360,12 +1632,10 @@ index 6d6b64a..1ddb7ee 100644
 +                None
 +            })
 +            .map(Into::into)
-+    }
-+
+     }
+ 
      /// Fetch a signer's KeyPackage from the registry. Members are signer
-     /// (installation) ids; resolving an account to its signers is the caller's
-     /// concern, above the core.
-@@ -165,6 +246,23 @@ impl GroupV1Convo {
+@@ -165,6 +390,23 @@ impl GroupV1Convo {
          content: &[u8],
          cx: &mut ServiceContext<S>,
      ) -> Result<(), ChatError> {
@@ -1389,7 +1659,7 @@ index 6d6b64a..1ddb7ee 100644
          let sender_id = cx.mls_identity.id().as_str();
          let reliable = cx.causal.on_send(&self.convo_id, sender_id, content);
          let wire = reliable.encode_to_vec();
-@@ -172,26 +270,23 @@ impl GroupV1Convo {
+@@ -172,37 +414,43 @@ impl GroupV1Convo {
          let mls_message_out = self
              .mls_group
              .create_message(&cx.mls_provider, &cx.mls_identity, &wire)
@@ -1421,15 +1691,24 @@ index 6d6b64a..1ddb7ee 100644
          }
  
 -        // Wrap in Payload frames
-         let aep = AddressedEncryptedPayload {
-             delivery_address: self.delivery_address(),
-             data: EncryptedPayload {
-@@ -200,9 +295,17 @@ impl GroupV1Convo {
-                 })),
-             },
+-        let aep = AddressedEncryptedPayload {
+-            delivery_address: self.delivery_address(),
+-            data: EncryptedPayload {
+-                encryption: Some(encrypted_payload::Encryption::Plaintext(Plaintext {
+-                    payload: msg_bytes.into(),
+-                })),
+-            },
++        // #graph-hiding Phase 1: build the EncryptedPayload as before, then OUTER-seal
++        // it so the node can't read the MLS framing (group_id/epoch), and address it to
++        // the global topic with the opaque route_tag as the hint (no cleartext group id).
++        let enc = EncryptedPayload {
++            encryption: Some(encrypted_payload::Encryption::Plaintext(Plaintext {
++                payload: msg_bytes.into(),
++            })),
          };
 -        let env = aep.into_envelope(self.convo_id.clone());
-+        aep.into_envelope(self.convo_id.clone())
++        let sealed = Self::seal(&self.outer_key, &enc.encode_to_vec());
++        crate::types::AddressedEnvelope::new(GLOBAL_TOPIC.to_string(), self.route_tag.clone(), &sealed)
 +    }
  
 -        // Send via DS
@@ -1444,7 +1723,7 @@ index 6d6b64a..1ddb7ee 100644
          cx.ds
              .publish(env)
              .map_err(|e| ChatError::Delivery(e.to_string()))
-@@ -215,6 +318,102 @@ impl Identified for GroupV1Convo {
+@@ -215,6 +463,102 @@ impl Identified for GroupV1Convo {
      }
  }
  
@@ -1547,7 +1826,7 @@ index 6d6b64a..1ddb7ee 100644
  impl<S: ExternalServices> Convo<S> for GroupV1Convo {
      fn send_content(
          &mut self,
-@@ -224,6 +423,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+@@ -224,6 +568,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
          self.send_message(content, cx)
      }
  
@@ -1562,7 +1841,7 @@ index 6d6b64a..1ddb7ee 100644
      fn handle_frame(
          &mut self,
          cx: &mut ServiceContext<S>,
-@@ -246,48 +453,23 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+@@ -246,48 +598,23 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
              return Ok(ConvoOutcome::empty(self.convo_id.to_string()));
          }
  
@@ -1624,7 +1903,22 @@ index 6d6b64a..1ddb7ee 100644
              members_changed: false,
          })
      }
-@@ -307,6 +489,16 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -295,6 +622,14 @@ impl<S: ExternalServices> Convo<S> for GroupV1Convo {
+     fn wakeup(&mut self, _: &mut ServiceContext<S>) -> Result<ConvoOutcome, ChatError> {
+         Ok(ConvoOutcome::empty(self.id().to_string()))
+     }
++
++    fn try_route(&self, hint: &str, sealed: &[u8]) -> Option<Vec<u8>> {
++        self.route_and_unseal(hint, sealed)
++    }
++
++    fn route_tag(&self) -> Option<String> {
++        Some(self.route_tag.clone())
++    }
+ }
+ 
+ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -307,6 +642,16 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
          cx: &mut ServiceContext<S>,
          members: &[IdentIdRef],
      ) -> Result<(), ChatError> {
@@ -1641,7 +1935,7 @@ index 6d6b64a..1ddb7ee 100644
          if members.len() > 50 {
              // This is a temporary limit that originates from the the De-MLS epoch time.
              return Err(ChatError::Protocol(
-@@ -322,6 +514,9 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -322,6 +667,9 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
              keypkgs.push(self.key_package_for_signer(ident, &cx.mls_provider, &cx.registry)?);
          }
  
@@ -1651,7 +1945,7 @@ index 6d6b64a..1ddb7ee 100644
          let (commit, welcome, _group_info) = self
              .mls_group
              .add_members(
-@@ -329,11 +524,11 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -329,11 +677,11 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
                  &cx.mls_identity,
                  keypkgs.iter().as_slice(),
              )
@@ -1665,12 +1959,120 @@ index 6d6b64a..1ddb7ee 100644
  
          // TODO: (P3) Evaluate privacy/performance implications of an aggregated Welcome for multiple users
          for signer_id in members {
-@@ -353,6 +548,6 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+@@ -353,6 +701,114 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
      }
  
      fn metadata(&self) -> Option<ConvoMetadata> {
 -        None
 +        self.read_metadata()
++    }
++
++    // #graph-hiding Phase 1b test hook: expose the live MLS epoch so the
++    // epoch-stability test can PROVE a commit advanced the epoch (and then assert
++    // the route_tag/outer_key are unchanged across it). Not used in production.
++    #[doc(hidden)]
++    fn mls_epoch_for_test(&self) -> u64 {
++        self.mls_group.epoch().as_u64()
++    }
++}
++
++// #graph-hiding Phase 1b — crypto unit tests for the outer seal that hides the MLS
++// framing (group_id/epoch) from the delivery node. These reach the PRIVATE
++// `seal`/`unseal` directly (same-module child), so they test the AEAD contract in
++// isolation from MLS: authenticated confidentiality (right key opens, wrong key /
++// tampered / truncated blobs are rejected) and random-nonce non-determinism.
++#[cfg(test)]
++mod seal_tests {
++    use super::{GroupV1Convo, OUTER_NONCE_LEN};
++
++    const K1: [u8; 32] = [7u8; 32];
++    const K2: [u8; 32] = [9u8; 32];
++    const MSG: &[u8] = b"the quick brown fox jumps over the lazy dog";
++
++    // (a) Round-trip: the same key that sealed a message opens it back to the
++    // exact plaintext.
++    #[test]
++    fn seal_roundtrips_with_matching_key() {
++        let sealed = GroupV1Convo::seal(&K1, MSG);
++        assert_eq!(
++            GroupV1Convo::unseal(&K1, &sealed),
++            Some(MSG.to_vec()),
++            "unseal(k, seal(k, m)) must equal Some(m)"
++        );
++    }
++
++    // (b) Wrong key: a different outer key cannot open the blob (this is exactly
++    // "the message is not for this conversation" on the receive path).
++    #[test]
++    fn unseal_with_wrong_key_fails() {
++        let sealed = GroupV1Convo::seal(&K1, MSG);
++        assert_eq!(
++            GroupV1Convo::unseal(&K2, &sealed),
++            None,
++            "unseal(k2, seal(k1, m)) must be None (wrong-key rejection)"
++        );
++    }
++
++    // (c) Tamper: flipping ANY single byte of the sealed blob (nonce region or
++    // ciphertext/tag region) must make it unopenable — AEAD integrity. We sweep
++    // every byte position, not just one, so a partial-integrity regression is caught.
++    #[test]
++    fn tampering_any_byte_fails_unseal() {
++        let sealed = GroupV1Convo::seal(&K1, MSG);
++        // Sanity: the pristine blob opens.
++        assert!(GroupV1Convo::unseal(&K1, &sealed).is_some());
++        for i in 0..sealed.len() {
++            let mut bad = sealed.clone();
++            bad[i] ^= 0x01; // flip the low bit at position i
++            assert_eq!(
++                GroupV1Convo::unseal(&K1, &bad),
++                None,
++                "flipping byte {i} of the sealed blob must break unseal (AEAD integrity)"
++            );
++        }
++    }
++
++    // (d) Nonce uniqueness: sealing the SAME message twice yields DIFFERENT wire
++    // bytes (fresh random 12-byte nonce each time), yet both still unseal to the
++    // original — proving we never reuse a (key, nonce) pair for identical plaintext.
++    #[test]
++    fn seal_uses_a_fresh_random_nonce() {
++        let a = GroupV1Convo::seal(&K1, MSG);
++        let b = GroupV1Convo::seal(&K1, MSG);
++        assert_ne!(
++            a, b,
++            "two seals of the same message must differ (random per-message nonce)"
++        );
++        // The difference must be in the nonce prefix (first 12 bytes), which then
++        // makes the ciphertext differ too.
++        assert_ne!(
++            &a[..OUTER_NONCE_LEN],
++            &b[..OUTER_NONCE_LEN],
++            "the 12-byte nonce prefix must differ between two seals"
++        );
++        assert_eq!(GroupV1Convo::unseal(&K1, &a), Some(MSG.to_vec()));
++        assert_eq!(GroupV1Convo::unseal(&K1, &b), Some(MSG.to_vec()));
++    }
++
++    // (e) Too-short input: a blob shorter than the nonce length can't even carry a
++    // nonce, so unseal must reject it rather than panic on the split.
++    #[test]
++    fn unseal_rejects_too_short_input() {
++        for len in 0..OUTER_NONCE_LEN {
++            let short = vec![0u8; len];
++            assert_eq!(
++                GroupV1Convo::unseal(&K1, &short),
++                None,
++                "a {len}-byte blob (< {OUTER_NONCE_LEN}) must unseal to None"
++            );
++        }
++        // Exactly nonce-length but no ciphertext/tag is also unopenable (no AEAD tag).
++        let nonce_only = vec![0u8; OUTER_NONCE_LEN];
++        assert_eq!(
++            GroupV1Convo::unseal(&K1, &nonce_only),
++            None,
++            "a nonce-only blob (no ciphertext/tag) must unseal to None"
++        );
      }
  }
 diff --git a/core/conversations/src/conversation/group_v2.rs b/core/conversations/src/conversation/group_v2.rs
@@ -1741,8 +2143,44 @@ index c547e5a..335f523 100644
              members_changed,
          }
      }
+diff --git a/core/conversations/src/conversation/mls_extensions.rs b/core/conversations/src/conversation/mls_extensions.rs
+index a5b4033..53c41b1 100644
+--- a/core/conversations/src/conversation/mls_extensions.rs
++++ b/core/conversations/src/conversation/mls_extensions.rs
+@@ -13,11 +13,30 @@ use crate::types::ConvoMetadata;
+ /// range (0xF000–0xFFFF) reserved by RFC 9420 for non-registered extensions.
+ pub const GROUP_METADATA_EXTENSION_TYPE: u16 = 0xFF01;
+ 
++/// #graph-hiding Phase 1b: a random, per-conversation secret carried in the group
++/// context. Being a GroupContext extension it is (a) identical for every member,
++/// (b) STABLE across epochs (only a GroupContextExtensions proposal changes it —
++/// we never send one), (c) delivered to late joiners inside the encrypted Welcome,
++/// and (d) never present on the per-message wire. We derive the sealed-envelope
++/// route_tag + outer_key from it, so graph-hiding no longer depends on epoch
++/// agreement (the wall that killed the per-epoch exporter spikes). Private-use range.
++pub const GROUP_SECRET_EXTENSION_TYPE: u16 = 0xFF02;
++
+ pub fn capabilities_with_group_metadata() -> Capabilities {
++    capabilities_for(true)
++}
++
++/// Capabilities advertising our Unknown group-context extensions. The graph-secret
++/// extension is always advertised; the metadata extension only for named groups.
++pub fn capabilities_for(has_meta: bool) -> Capabilities {
++    let mut ext_types = vec![ExtensionType::Unknown(GROUP_SECRET_EXTENSION_TYPE)];
++    if has_meta {
++        ext_types.push(ExtensionType::Unknown(GROUP_METADATA_EXTENSION_TYPE));
++    }
+     Capabilities::new(
+         None, // default protocol versions
+         None, // default ciphersuites
+-        Some(&[ExtensionType::Unknown(GROUP_METADATA_EXTENSION_TYPE)]),
++        Some(&ext_types),
+         None, // default proposal types
+         None, // default credential types
+     )
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
-index 99ad312..4b4a718 100644
+index 99ad312..2fd94ab 100644
 --- a/core/conversations/src/core.rs
 +++ b/core/conversations/src/core.rs
 @@ -11,16 +11,20 @@ use crate::{
@@ -1758,7 +2196,8 @@ index 99ad312..4b4a718 100644
      proto::{EncryptedPayload, EnvelopeV1, Message},
  };
  use crypto::{Identity, PublicKey};
- use openmls::group::GroupId;
+-use openmls::group::GroupId;
++use openmls::group::{GroupId, MlsGroup};
 +use openmls::prelude::OpenMlsProvider as _;
  use shared_traits::{IdentId, IdentIdRef};
  use std::collections::HashMap;
@@ -1768,7 +2207,46 @@ index 99ad312..4b4a718 100644
  use tracing::{info, instrument};
  
  pub use crate::conversation::ConversationId;
-@@ -129,7 +133,15 @@ where
+@@ -36,6 +40,11 @@ pub struct Core<S: ExternalServices> {
+     pq_inbox: InboxV2,
+     // Cache of loaded conversations
+     cached_convos: HashMap<String, ConvoTypeOwned<S>>,
++    // #graph-hiding Phase 1: opaque route_tag → convo_id. Lets inbound messages on the
++    // global topic reach conversations that aren't currently cached (store catch-up into
++    // a freshly-launched app). Built at assemble from stored GroupV1s; updated as new
++    // conversations are registered.
++    route_index: HashMap<String, String>,
+ }
+ 
+ // Constructors live on the `(DS, RS, CS)` form: `S` can't be inferred backwards
+@@ -112,6 +121,26 @@ where
+         self.services.demls_config = config;
+     }
+ 
++    /// Test hook: drop all in-memory cached conversations, keeping the persistent
++    /// `route_index` and store. Simulates a conversation not being currently open
++    /// (or a fresh app start before it's re-cached), so inbound delivery must go
++    /// through the #graph-hiding Phase 1 slow path (route_index → load → unseal).
++    #[doc(hidden)]
++    pub fn clear_convo_cache_for_test(&mut self) {
++        self.cached_convos.clear();
++    }
++
++    /// Test hook: current MLS epoch of a cached group conversation, so the
++    /// #graph-hiding Phase 1b epoch-stability test can prove a membership change
++    /// actually advanced the epoch. `None` if the convo isn't cached as a group.
++    #[doc(hidden)]
++    pub fn group_epoch_for_test(&self, convo_id: &str) -> Option<u64> {
++        match self.cached_convos.get(convo_id)? {
++            ConvoTypeOwned::Group(c) => Some(c.mls_epoch_for_test()),
++            ConvoTypeOwned::Direct(_) => None,
++        }
++    }
++
+     /// Builds the inbox/account/MLS/causal state, subscribes both inbound
+     /// addresses, and assembles the service bundle — shared by both constructors.
+     fn assemble(
+@@ -129,7 +158,15 @@ where
          // credential below still carries the full `id()`.
          let ident_id = IdentId::new(hex::encode(ident.public_key().as_ref()));
          let mls_identity = MlsIdentityProvider::new(ident);
@@ -1785,48 +2263,62 @@ index 99ad312..4b4a718 100644
          let causal = CausalHistoryStore::new();
          let pq_inbox = InboxV2::new(ident_id);
  
-@@ -138,6 +150,40 @@ where
+@@ -138,6 +175,46 @@ where
              .subscribe(&pq_inbox.delivery_address())
              .map_err(ChatError::generic)?;
  
-+        // #211: also re-subscribe every EXISTING *reloadable* conversation's
-+        // delivery topic. Otherwise a restored session subscribes ONLY the invite
-+        // inbox (above), so it receives NOTHING on prior chats until it *sends* to
-+        // them (sending is what re-subscribes) — a passive receiver stayed dark
-+        // until it replied, then everything flushed at once. Re-subscribing here
-+        // lets the delivery layer's periodic store catch-up pull missed messages
-+        // without a send.
-+        //
-+        // GroupV2 is deliberately SKIPPED: de-mls has no load path, so a GroupV2
-+        // from a previous session cannot be rebuilt (`load_convo` returns
-+        // `group_v2_not_reloadable`). Subscribing it would only pull messages the
-+        // lib then fails to process — surfacing a "cannot be rebuilt" error per
-+        // message. A GroupV2 created/joined *this* session subscribes via its own
-+        // create/join path and is unaffected. Best-effort: a bad row is skipped,
-+        // never failing the open.
++        // #graph-hiding Phase 1: all GroupV1/Direct conversations share ONE global
++        // content-topic, so a restored session simply subscribes it once (this also
++        // supersedes the #211 per-conversation re-subscribe: the periodic store
++        // catch-up on the global topic pulls missed messages for every convo without a
++        // send). Inbound frames are demultiplexed to conversations by their opaque
++        // route_tag in `handle_payload_inner`.
++        if let Err(e) = delivery.subscribe(GroupV1Convo::global_topic()) {
++            info!("global-topic subscribe on open failed: {e}");
++        }
++        // #graph-hiding Phase 1: build the route_tag -> convo_id index for stored
++        // GroupV1 conversations, so store catch-up into a freshly-launched app can route
++        // inbound sealed messages to convos that haven't been opened yet (the #211
++        // property). GroupV2 is skipped (not reloadable); Unknown has no route.
++        let mut route_index: HashMap<String, String> = HashMap::new();
 +        match store.load_conversations() {
 +            Ok(metas) => {
 +                for meta in metas {
-+                    let addr = match meta.kind {
-+                        ConversationKind::GroupV1 => {
-+                            GroupV1Convo::delivery_address_from_id(&meta.local_convo_id)
-+                        }
-+                        // GroupV2 can't be reloaded → don't pull its undecryptable
-+                        // messages; Unknown rows have no derivable topic.
-+                        ConversationKind::GroupV2 | ConversationKind::Unknown(_) => continue,
++                    if meta.kind != ConversationKind::GroupV1 {
++                        continue;
++                    }
++                    // #339: fast path — use the persisted route_tag, no MLS-group load.
++                    if let Some(tag) = meta.route_tag {
++                        route_index.insert(tag, meta.local_convo_id);
++                        continue;
++                    }
++                    // Fallback for pre-#339 rows (no persisted tag): load the group and
++                    // derive the tag from its group-context secret.
++                    let Ok(gid_bytes) = hex::decode(&meta.local_convo_id) else {
++                        continue;
 +                    };
-+                    if let Err(e) = delivery.subscribe(&addr) {
-+                        info!(convo = %meta.local_convo_id, "re-subscribe on open failed: {e}");
++                    let gid = GroupId::from_slice(&gid_bytes);
++                    if let Ok(Some(g)) = MlsGroup::load(mls_provider.storage(), &gid) {
++                        let (_key, tag) = GroupV1Convo::seal_material(&g);
++                        route_index.insert(tag, meta.local_convo_id);
 +                    }
 +                }
 +            }
-+            Err(e) => info!("load_conversations for re-subscribe failed: {e}"),
++            Err(e) => info!("route index build failed: {e}"),
 +        }
 +
          Ok(Self {
              services: ServiceContext {
                  ds: delivery,
-@@ -180,7 +226,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -153,6 +230,7 @@ where
+             },
+             pq_inbox,
+             cached_convos: HashMap::new(),
++            route_index,
+         })
+     }
+ }
+@@ -180,7 +258,24 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      /// Idempotent on the server side (registries that retain history will keep
      /// the most recent N submissions; older entries are pruned).
      pub fn register_keypackage(&mut self) -> Result<(), ChatError> {
@@ -1852,7 +2344,7 @@ index 99ad312..4b4a718 100644
      }
  
      pub fn installation_name(&self) -> &str {
-@@ -204,7 +267,18 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -204,7 +299,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      ) -> Result<ConversationId, ChatError> {
          let convo = DirectV1Convo::new(&mut self.services, members)?;
          let convo_id = convo.id().to_string();
@@ -1865,13 +2357,14 @@ index 99ad312..4b4a718 100644
 +                local_convo_id: convo_id.clone(),
 +                remote_convo_id: "0".into(),
 +                kind: ConversationKind::GroupV1,
++                route_tag: convo.graph_route_tag(), // #339
 +            })?;
          self.register_convo(ConvoTypeOwned::Direct(Box::new(convo)))?;
 +        self.persist_mls_state()?;
  
          Ok(convo_id)
      }
-@@ -213,17 +287,23 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -213,28 +320,36 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          &mut self,
          participants: &[IdentIdRef],
      ) -> Result<ConversationId, ChatError> {
@@ -1897,7 +2390,12 @@ index 99ad312..4b4a718 100644
          self.services
              .store
              .save_conversation(&storage::ConversationMeta {
-@@ -235,6 +315,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+                 local_convo_id: convo.id().to_string(),
+                 remote_convo_id: "0".into(),
+                 kind: ConversationKind::GroupV1,
++                route_tag: convo.graph_route_tag(), // #339 (epoch-stable; unchanged by add_member below)
+             })?;
+         convo.add_member(&mut self.services, participants)?;
          let convo_id = convo.id().to_string();
  
          self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
@@ -1905,7 +2403,7 @@ index 99ad312..4b4a718 100644
  
          Ok(convo_id)
      }
-@@ -252,7 +333,20 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -252,7 +367,21 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          convo.add_member(&mut self.services, participants)?;
          let convo_id = convo.id().to_string();
  
@@ -1920,13 +2418,14 @@ index 99ad312..4b4a718 100644
 +                local_convo_id: convo_id.clone(),
 +                remote_convo_id: "0".into(),
 +                kind: ConversationKind::GroupV2,
++                route_tag: None, // #339: GroupV2 is not on the sealed global-topic path
 +            })?;
          self.register_convo(ConvoTypeOwned::Group(Box::new(convo)))?;
 +        self.persist_mls_state()?;
  
          Ok(convo_id)
      }
-@@ -262,6 +356,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -262,6 +391,19 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          &mut self,
          convo_id: &str,
          members: &[IdentIdRef],
@@ -1946,7 +2445,7 @@ index 99ad312..4b4a718 100644
      ) -> Result<(), ChatError> {
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
-@@ -284,6 +391,39 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -284,6 +426,39 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          }
      }
  
@@ -1986,7 +2485,7 @@ index 99ad312..4b4a718 100644
      /// Each member's MLS leaf-credential content (hex-encoded); errors if
      /// `convo_id` names a direct (non-group) conversation.
      pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
-@@ -333,6 +473,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -333,6 +508,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
  
      /// Encrypt and publish `content` to an existing conversation.
      pub fn send_content(&mut self, convo_id: &str, content: &[u8]) -> Result<(), ChatError> {
@@ -1999,7 +2498,7 @@ index 99ad312..4b4a718 100644
          if self.cached_convos.contains_key(convo_id) {
              let convo = self
                  .cached_convos
-@@ -345,9 +491,51 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -345,24 +526,95 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          }
      }
  
@@ -2050,9 +2549,63 @@ index 99ad312..4b4a718 100644
 -    pub fn handle_payload(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
 +    fn handle_payload_inner(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
          let env = EnvelopeV1::decode(payload)?;
++        let hint = env.conversation_hint;
  
-         // TODO: Impl Conversation hinting
-@@ -403,6 +591,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+-        // TODO: Impl Conversation hinting
+-        let convo_id = env.conversation_hint;
++        // Inbox frames keep their own cleartext id and are not sealed/global.
++        if hint == self.pq_inbox.id() {
++            return self.dispatch_to_inbox2(&env.payload);
++        }
+ 
+-        match convo_id {
+-            c if c == self.pq_inbox.id() => self.dispatch_to_inbox2(&env.payload),
+-            c if self.cached_convos.contains_key(&c) => {
+-                self.dispatch_to_convo(&c, &env.payload).map(Into::into)
+-            }
+-            c if self.services.store.has_conversation(&c)? => {
+-                self.dispatch_to_convo(&c, &env.payload).map(Into::into)
++        // Legacy / non-sealed path (GroupV2 de-mls, etc.): the hint is a real convo_id.
++        // GroupV1 sealed messages carry an opaque route_tag here (never a convo_id), so
++        // they fall through to the tag paths below — the two key spaces are disjoint.
++        if self.cached_convos.contains_key(&hint) || self.services.store.has_conversation(&hint)? {
++            return self.dispatch_to_convo(&hint, &env.payload).map(Into::into);
++        }
++
++        // #graph-hiding Phase 1: conversation messages arrive on the single global topic
++        // with an opaque route_tag `hint` and a SEALED payload (no cleartext group id on
++        // the wire). Match the tag against cached convos and unseal; the inner bytes are
++        // the original EncryptedPayload. Collect the first match, then dispatch (so we
++        // don't hold an immutable borrow of cached_convos across the &mut dispatch).
++        let routed = self.cached_convos.iter().find_map(|(cid, convo)| {
++            let inner = match convo {
++                ConvoTypeOwned::Group(c) => c.try_route(&hint, &env.payload),
++                ConvoTypeOwned::Direct(c) => c.try_route(&hint, &env.payload),
++            };
++            inner.map(|bytes| (cid.clone(), bytes))
++        });
++        if let Some((cid, inner)) = routed {
++            return self.dispatch_to_convo(&cid, &inner).map(Into::into);
++        }
++
++        // Slow path: a known conversation that isn't currently cached (e.g. store
++        // catch-up into a freshly-launched app — the #211 property). Resolve the opaque
++        // tag → convo_id via the index, load the convo to unseal, then dispatch.
++        if let Some(cid) = self.route_index.get(&hint).cloned() {
++            let inner = {
++                let convo = self.load_convo(&cid)?;
++                convo.try_route(&hint, &env.payload)
++            };
++            if let Some(inner) = inner {
++                return self.dispatch_to_convo(&cid, &inner).map(Into::into);
+             }
+-            _ => Ok(PayloadOutcome::Empty),
+         }
++        Ok(PayloadOutcome::Empty)
+     }
+ 
+     // Dispatch encrypted payload to the post-quantum inbox.
+@@ -403,6 +655,12 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
      }
  
      pub fn wakeup(&mut self, convo_id: ConversationIdRef) -> Result<PayloadOutcome, ChatError> {
@@ -2065,7 +2618,26 @@ index 99ad312..4b4a718 100644
          info!(convos = ?self.cached_convos.keys().collect::<Vec<_>>(), id = ?self.services.mls_identity.id(), "Cached Convos");
  
          match convo_id {
-@@ -440,6 +634,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -426,7 +684,17 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+     }
+ 
+     fn register_convo(&mut self, convo: ConvoTypeOwned<S>) -> Result<(), ChatError> {
+-        let res = self.cached_convos.insert(convo.id().to_string(), convo);
++        let id = convo.id().to_string();
++        // #graph-hiding Phase 1: index this convo's route_tag so inbound sealed messages
++        // can reach it even after it's evicted or in a later session.
++        let tag = match &convo {
++            ConvoTypeOwned::Group(c) => c.route_tag(),
++            ConvoTypeOwned::Direct(c) => c.route_tag(),
++        };
++        if let Some(tag) = tag {
++            self.route_index.insert(tag, id.clone());
++        }
++        let res = self.cached_convos.insert(id, convo);
+ 
+         match res {
+             Some(_) => Err(ChatError::generic("Convo already exists. Cannot save")),
+@@ -440,6 +708,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          Ok(match record.kind {
              ConversationKind::GroupV1 => Box::new(self.load_mls_convo(&record.local_convo_id)?),
@@ -2073,7 +2645,7 @@ index 99ad312..4b4a718 100644
              ConversationKind::Unknown(_) => {
                  return Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()));
              }
-@@ -451,6 +646,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -451,6 +720,7 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
          let record = self.load_conversation_meta(convo_id)?;
          match record.kind {
              ConversationKind::GroupV1 => Ok(Box::new(self.load_mls_convo(&record.local_convo_id)?)),
@@ -2081,7 +2653,7 @@ index 99ad312..4b4a718 100644
              ConversationKind::Unknown(_) => {
                  Err(ChatError::UnsupportedConvoType(record.kind.as_str().into()))
              }
-@@ -475,24 +671,49 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+@@ -475,24 +745,49 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
              .ok_or_else(|| ChatError::NoConvo(convo_id.into()))
      }
  
@@ -2138,7 +2710,7 @@ index 99ad312..4b4a718 100644
  enum ConvoTypeOwned<S: ExternalServices> {
      Direct(Box<dyn Convo<S>>),
      Group(Box<dyn GroupConvo<S>>),
-@@ -528,6 +749,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
+@@ -528,6 +823,17 @@ impl<S: ExternalServices> Convo<S> for ConvoTypeOwned<S> {
          }
      }
  
@@ -2157,7 +2729,7 @@ index 99ad312..4b4a718 100644
          &mut self,
          cx: &mut ServiceContext<S>,
 diff --git a/core/conversations/src/inbox_v2.rs b/core/conversations/src/inbox_v2.rs
-index ff63d7d..0405581 100644
+index ff63d7d..cbd0d31 100644
 --- a/core/conversations/src/inbox_v2.rs
 +++ b/core/conversations/src/inbox_v2.rs
 @@ -11,7 +11,9 @@ use tracing::info;
@@ -2171,7 +2743,18 @@ index ff63d7d..0405581 100644
  
  use crate::ChatError;
  use crate::DeliveryService;
-@@ -121,9 +123,13 @@ impl InboxV2 {
+@@ -20,7 +22,9 @@ use crate::conversation::GroupConvo;
+ use crate::conversation::GroupV1Convo;
+ use crate::conversation::GroupV2Convo;
+ use crate::conversation::Identified as _;
+-use crate::conversation::mls_extensions::GROUP_METADATA_EXTENSION_TYPE;
++use crate::conversation::mls_extensions::{
++    GROUP_METADATA_EXTENSION_TYPE, GROUP_SECRET_EXTENSION_TYPE,
++};
+ use crate::outcomes::ConversationClass;
+ use crate::service_context::{ExternalServices, ServiceContext};
+ use crate::utils::{blake2b_hex, hash_size};
+@@ -121,9 +125,13 @@ impl InboxV2 {
          conversation_id_for(&self.ident_id)
      }
  
@@ -2188,7 +2771,7 @@ index ff63d7d..0405581 100644
      #[instrument(name = "inboxV2.handle_frame", skip_all, fields(user_id = %service_ctx.mls_identity.display_name()))]
      pub fn handle_frame<S: ExternalServices>(
          &self,
-@@ -144,7 +150,12 @@ impl InboxV2 {
+@@ -144,7 +152,12 @@ impl InboxV2 {
          match payload {
              InviteType::GroupV1(inv) => {
                  let convo = self.handle_heavy_invite(service_ctx, inv)?;
@@ -2202,6 +2785,27 @@ index ff63d7d..0405581 100644
              }
              InviteType::GroupV2(welcome_bytes) => {
                  info!("Process WelcomeMessage");
+@@ -167,6 +180,9 @@ impl InboxV2 {
+             local_convo_id: convo.id().to_string(),
+             remote_convo_id: "0".into(),
+             kind: ConversationKind::GroupV1,
++            // #339: persist the joined convo's route_tag so a restart rebuilds the
++            // index without loading its MLS group.
++            route_tag: convo.graph_route_tag(),
+         };
+         cx.store.save_conversation(&meta)?;
+         // TODO: (P1) Persist state
+@@ -209,6 +225,10 @@ impl InboxV2 {
+                 ExtensionType::ApplicationId,
+                 ExtensionType::LastResort,
+                 ExtensionType::Unknown(GROUP_METADATA_EXTENSION_TYPE),
++                // #graph-hiding Phase 1b: advertise support for the per-conversation
++                // graph-secret group-context extension, else a group requiring it
++                // rejects the add ("capabilities of the add proposal are insufficient").
++                ExtensionType::Unknown(GROUP_SECRET_EXTENSION_TYPE),
+             ])
+             .build();
+         let a = KeyPackage::builder()
 diff --git a/core/conversations/src/inbox_v2/mls_provider.rs b/core/conversations/src/inbox_v2/mls_provider.rs
 index f55f60f..0776bf8 100644
 --- a/core/conversations/src/inbox_v2/mls_provider.rs
@@ -2384,6 +2988,32 @@ index bba6e10..f8d4ee4 100644
      pub fn sign(&self, msg: &[u8]) -> Ed25519Signature {
          self.0.sign(msg).to_bytes().into()
      }
+diff --git a/core/integration_tests_core/Cargo.toml b/core/integration_tests_core/Cargo.toml
+index 462b701..ee39967 100644
+--- a/core/integration_tests_core/Cargo.toml
++++ b/core/integration_tests_core/Cargo.toml
+@@ -22,6 +22,10 @@ chat-sqlite = { workspace = true }
+ storage = { workspace = true }
+ 
+ # External dependencies (sorted)
++blake2 = "0.10"
++chat-proto = { git = "https://github.com/logos-messaging/chat_proto", rev = "37ec98a151f6d50aab2905802ac0a896477e62ea" }
++hex = "0.4.3"
++prost = "0.14.1"
+ tempfile = "3"
+ tracing = "0.1.44"
+ tracing-subscriber = "0.3"
+diff --git a/core/integration_tests_core/src/lib.rs b/core/integration_tests_core/src/lib.rs
+index 83db65e..376384b 100644
+--- a/core/integration_tests_core/src/lib.rs
++++ b/core/integration_tests_core/src/lib.rs
+@@ -2,5 +2,5 @@ mod test_client;
+ mod test_ident;
+ mod wakeup;
+ 
+-pub use test_client::TestHarness;
++pub use test_client::{TestClient, TestHarness};
+ pub use test_ident::TestIdent;
 diff --git a/core/integration_tests_core/tests/causal_history.rs b/core/integration_tests_core/tests/causal_history.rs
 index 434fad0..9f546bf 100644
 --- a/core/integration_tests_core/tests/causal_history.rs
@@ -2413,8 +3043,979 @@ index d80e690..6190612 100644
          .expect("Saro invite Raya ");
      harness.process_until(|h| h.raya().list_conversations().unwrap().len() == 1);
  
+diff --git a/core/integration_tests_core/tests/test_graph_hiding.rs b/core/integration_tests_core/tests/test_graph_hiding.rs
+new file mode 100644
+index 0000000..7b7374b
+--- /dev/null
++++ b/core/integration_tests_core/tests/test_graph_hiding.rs
+@@ -0,0 +1,52 @@
++//! #graph-hiding Phase 1 (#336/#338): the sealed global-topic path must deliver to a
++//! conversation that is NOT currently cached — the store-catch-up-into-a-fresh-app
++//! path (#211) whose absence caused on-device "no delivery" before the route_index fix.
++//!
++//! We settle a 1:1, then EVICT the receiver's in-memory conversation cache (keeping the
++//! persistent route_index, exactly as after a restart before the convo is re-opened).
++//! A subsequent message must still arrive, which can only happen via the slow path:
++//! route_index[route_tag] -> load_convo -> unseal -> dispatch.
++
++use integration_tests_core::TestHarness;
++use tracing::info;
++
++#[test]
++fn sealed_delivery_to_uncached_convo_via_route_index() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    const WARMUP: &[u8] = b"hello";
++    const AFTER_EVICT: &[u8] = b"catchup-please";
++
++    let mut harness = TestHarness::<2>::new(|_, _| {});
++
++    // Saro opens a 1:1 with Raya; settle until Raya has joined.
++    let raya_addr = harness.raya().addr();
++    let convo_id = harness
++        .saro()
++        .create_direct_convo_v1(&[&raya_addr])
++        .expect("saro create direct convo");
++    harness.process_until_label("join", |h| h.raya().convo_count() == 1);
++
++    // Warm-up message so the convo is fully settled on both sides.
++    harness.saro().send_content(&convo_id, WARMUP).expect("send warmup");
++    harness.process_until(|h| h.raya().check(&convo_id, WARMUP));
++
++    // EVICT Raya's in-memory convo cache — the convo now lives only in the store +
++    // persistent route_index, NOT cached_convos (the restarted-but-not-opened state).
++    // (`convo_count` reads the store, so it stays 1; the point is the *cache* is empty,
++    // forcing inbound routing through the slow path.)
++    harness.raya().clear_convo_cache_for_test();
++
++    // Saro sends again; Raya must receive it via the route_index slow path.
++    info!(target: "chat", "Saro -> (to uncached Raya): {AFTER_EVICT:?}");
++    harness.saro().send_content(&convo_id, AFTER_EVICT).expect("send after evict");
++    harness.process_until(|h| h.raya().check(&convo_id, AFTER_EVICT));
++
++    assert!(
++        harness.raya().check(&convo_id, AFTER_EVICT),
++        "Raya must receive the sealed message to an UNCACHED convo via the route_index slow path"
++    );
++}
+diff --git a/core/integration_tests_core/tests/test_graph_hiding_adversary.rs b/core/integration_tests_core/tests/test_graph_hiding_adversary.rs
+new file mode 100644
+index 0000000..a8a2c1d
+--- /dev/null
++++ b/core/integration_tests_core/tests/test_graph_hiding_adversary.rs
+@@ -0,0 +1,325 @@
++//! #graph-hiding Phase 1b — ADVERSARY test for the sealed-envelope / graph-hiding
++//! security property.
++//!
++//! Threat model: an honest-but-curious delivery node sees exactly what is published
++//! to the delivery layer — for every message, the `content_topic` (== the
++//! `delivery_address`) and the raw envelope `payload` bytes. It does NOT hold any
++//! client's MLS keys or seal keys. The claim under test is the NEGATIVE one:
++//! from (content_topic, payload) alone the node CANNOT recover the conversation
++//! graph.
++//!
++//! We drive real conversations through the in-process `LocalBroadcaster`, capture
++//! EVERY published `(content_topic, payload)` pair via `all_published()` (the exact
++//! node's-eye view — independent of any consumer's cursor/subscription/self-echo
++//! filter), decode each `EnvelopeV1` with `prost`, and assert the four properties
++//! plus a positive control proving the byte-search is not vacuous.
++//!
++//! What this DOES prove: the node cannot map wire traffic to real conversations
++//! from the topic, the conversation_hint, or the sealed payload contents.
++//! What this does NOT address: timing / traffic-analysis correlation, message-size
++//! side channels, or the invite/inbox rendezvous bootstrap path (which rides a
++//! per-recipient inbox topic, out of scope here — see the report notes).
++
++use chat_proto::logoschat::envelope::EnvelopeV1;
++use integration_tests_core::TestHarness;
++use prost::Message as _;
++use tracing::info;
++
++/// The single global content-topic every GroupV1/DirectV1 conversation shares.
++/// (Mirrors `GLOBAL_TOPIC` in core/conversations/src/conversation/group_v1.rs;
++/// the test asserts against the literal so a change to the constant is caught.)
++const GLOBAL_TOPIC: &str = "peers-global-v1";
++
++/// True iff `needle` occurs as a contiguous byte-subsequence of `haystack`.
++fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
++    if needle.is_empty() || needle.len() > haystack.len() {
++        return false;
++    }
++    haystack.windows(needle.len()).any(|w| w == needle)
++}
++
++/// Case-insensitive ASCII substring search (for the hex form of the group id).
++fn contains_ascii_ci(haystack: &[u8], needle: &str) -> bool {
++    let hay = haystack.to_ascii_lowercase();
++    let need = needle.to_ascii_lowercase().into_bytes();
++    contains_bytes(&hay, &need)
++}
++
++/// Assert the raw group id (both its raw bytes and its ASCII hex, case-insensitive)
++/// does NOT appear anywhere in `wire`.
++fn assert_group_id_absent(wire: &[u8], gid_raw: &[u8], gid_hex: &str, ctx: &str) {
++    assert!(
++        !contains_bytes(wire, gid_raw),
++        "LEAK: raw group_id bytes appear in published wire bytes ({ctx})"
++    );
++    assert!(
++        !contains_ascii_ci(wire, gid_hex),
++        "LEAK: group_id hex appears in published wire bytes ({ctx})"
++    );
++    // Also guard against the hex being carried uppercase.
++    assert!(
++        !contains_ascii_ci(wire, &gid_hex.to_ascii_uppercase()),
++        "LEAK: group_id hex (uppercase) appears in published wire bytes ({ctx})"
++    );
++}
++
++#[test]
++fn adversary_cannot_recover_conversation_graph() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    // ---- POSITIVE CONTROL (make the suite trustworthy) --------------------
++    // Prove the byte-search WOULD catch a leak, so an "absent" assertion later
++    // is not vacuous. We inject a known group-id into a synthetic envelope and
++    // confirm every search variant finds it.
++    {
++        let gid_raw: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];
++        let gid_hex = hex::encode(gid_raw); // "deadbeef01020304"
++        let leaky = EnvelopeV1 {
++            conversation_hint: gid_hex.clone(), // a node that DID leak the id here
++            salt: 0,
++            payload: {
++                let mut p = b"prefix".to_vec();
++                p.extend_from_slice(gid_raw); // ...and in the (unsealed) payload
++                p.into()
++            },
++        };
++        let leaky_wire = leaky.encode_to_vec();
++        assert!(
++            contains_bytes(&leaky_wire, gid_raw),
++            "positive control: raw-byte search must find an embedded group_id"
++        );
++        assert!(
++            contains_ascii_ci(&leaky_wire, &gid_hex),
++            "positive control: hex search must find an embedded group_id hex"
++        );
++        assert!(
++            contains_ascii_ci(&leaky_wire, &gid_hex.to_ascii_uppercase()),
++            "positive control: hex search must be case-insensitive"
++        );
++        // And confirm the detector is not a constant-true: a random id it does
++        // NOT contain must NOT be found.
++        assert!(
++            !contains_bytes(&leaky_wire, &[0xAA; 16]),
++            "positive control: search must not report a false positive"
++        );
++        info!("positive control passed: byte-search detects an injected group_id");
++    }
++
++    // ---- Two distinct conversations for the SAME sending client -----------
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++
++    let raya_addr = harness.raya().addr();
++    let pax_addr = harness.pax().addr();
++
++    // Convo A: a 1:1 (DirectV1) Saro <-> Raya.
++    let convo_a = harness
++        .saro()
++        .create_direct_convo_v1(&[&raya_addr])
++        .expect("saro create direct convo A");
++    harness.process_until_label("raya join A", |h| h.raya().convo_count() == 1);
++
++    // Convo B: a named group (GroupV1) Saro + Pax.
++    let convo_b = harness
++        .saro()
++        .create_group_convo_v1(&[&pax_addr], "grp", "desc")
++        .expect("saro create group convo B");
++    harness.process_until_label("pax join B", |h| h.pax().convo_count() == 1);
++
++    // convo_id == hex(mls_group.group_id()) — the value the node must NOT be able
++    // to recover from the wire. These are what a real test/app knows per convo.
++    assert_ne!(convo_a, convo_b, "the two conversations must have distinct ids");
++    let gid_a_raw = hex::decode(&convo_a).expect("convo_a is hex(group_id)");
++    let gid_b_raw = hex::decode(&convo_b).expect("convo_b is hex(group_id)");
++    assert_ne!(gid_a_raw, gid_b_raw, "the two group_ids must differ");
++
++    // Settle both convos with a warm-up so they are fully established, then verify
++    // real delivery works (this is a genuine, functioning graph — not a stub).
++    harness.saro().send_content(&convo_a, b"warm-a").expect("send warm A");
++    harness.saro().send_content(&convo_b, b"warm-b").expect("send warm B");
++    harness.process_until(|h| {
++        h.raya().check(&convo_a, b"warm-a") && h.pax().check(&convo_b, b"warm-b")
++    });
++
++    // ---- Capture the node's-eye view, isolating each convo's app message ----
++    // Snapshot the published-count, send ONE app message on A, then ONE on B, with
++    // no intervening processing, so the newly-appended global-topic envelopes are
++    // exactly Saro's two application messages — one per conversation. This lets us
++    // tie a captured hint to a known convo_id.
++    let base = harness.saro().ds().all_published().len();
++
++    harness.saro().send_content(&convo_a, b"secret-to-A").expect("send A");
++    let after_a = harness.saro().ds().all_published().len();
++
++    harness.saro().send_content(&convo_b, b"secret-to-B").expect("send B");
++    let all = harness.saro().ds().all_published();
++    let after_b = all.len();
++
++    // Exactly one new published envelope per send (send_content publishes one
++    // sealed app message; no commit/welcome on this path).
++    assert_eq!(after_a - base, 1, "one wire message for the A send");
++    assert_eq!(after_b - after_a, 1, "one wire message for the B send");
++
++    let (topic_a, wire_a) = all[base].clone();
++    let (topic_b, wire_b) = all[after_a].clone();
++    let env_a = EnvelopeV1::decode(wire_a.as_slice()).expect("decode envelope A");
++    let env_b = EnvelopeV1::decode(wire_b.as_slice()).expect("decode envelope B");
++    let hint_a = env_a.conversation_hint.clone();
++    let hint_b = env_b.conversation_hint.clone();
++
++    // ===================== PROPERTY 1: SINGLE TOPIC ========================
++    // Every conversation message rides the ONE global content-topic — there is no
++    // per-conversation topic selector. We check both isolated app messages AND the
++    // full population of conversation-layer messages (the commit published during
++    // group setup also rides the sealed global path).
++    assert_eq!(topic_a, GLOBAL_TOPIC, "A app message must ride the global topic");
++    assert_eq!(topic_b, GLOBAL_TOPIC, "B app message must ride the global topic");
++
++    // The legacy per-conversation delivery address (Blake2b6("delivery_addr|"||id))
++    // must NEVER appear as a topic — proving there is no per-convo topic selector.
++    for id in [&convo_a, &convo_b] {
++        let legacy = legacy_per_convo_topic(id);
++        assert!(
++            all.iter().all(|(t, _)| *t != legacy),
++            "a per-conversation topic ({legacy}) must never appear on the wire"
++        );
++        // Nor may the raw convo_id/group_id hex ever be used as a topic.
++        assert!(
++            all.iter().all(|(t, _)| t != id),
++            "the convo_id must never appear as a topic"
++        );
++    }
++
++    // Report the full set of topics seen (global conversation topic + any
++    // per-recipient inbox topics from the bootstrap/invite path).
++    let mut topics: Vec<String> = all.iter().map(|(t, _)| t.clone()).collect();
++    topics.sort();
++    topics.dedup();
++    info!(?topics, "all content-topics observed on the wire");
++    assert!(
++        topics.contains(&GLOBAL_TOPIC.to_string()),
++        "the global conversation topic must be present"
++    );
++
++    // ============ PROPERTY 2: NO CLEARTEXT CONVO ID IN THE HINT ============
++    assert_ne!(
++        hint_a, convo_a,
++        "conversation_hint (A) must NOT equal the convo_id (= hex group_id)"
++    );
++    assert_ne!(
++        hint_b, convo_b,
++        "conversation_hint (B) must NOT equal the convo_id (= hex group_id)"
++    );
++    // The hint must not even contain the group id as a substring.
++    assert!(
++        !contains_ascii_ci(hint_a.as_bytes(), &convo_a),
++        "conversation_hint (A) must not contain the group_id hex"
++    );
++    assert!(
++        !contains_ascii_ci(hint_b.as_bytes(), &convo_b),
++        "conversation_hint (B) must not contain the group_id hex"
++    );
++
++    // ============ PROPERTY 3: NO GROUP ID ANYWHERE ON THE WIRE =============
++    // Search EVERY published envelope's raw bytes for BOTH group_ids (raw + hex,
++    // case-insensitive). The MLS framing carries the group_id in cleartext; if the
++    // outer seal failed to hide it, it would surface here.
++    for (i, (topic, wire)) in all.iter().enumerate() {
++        assert_group_id_absent(wire, &gid_a_raw, &convo_a, &format!("msg#{i} topic={topic} vs A"));
++        assert_group_id_absent(wire, &gid_b_raw, &convo_b, &format!("msg#{i} topic={topic} vs B"));
++    }
++
++    // ================ PROPERTY 4: UNLINKABILITY ACROSS CONVOS ==============
++    // Distinct conversations from the SAME sender produce distinct opaque hints,
++    // and grouping the wire by (topic, hint) yields only opaque buckets that
++    // cannot be mapped to a real group_id (follows from #2 + #3).
++    assert_ne!(
++        hint_a, hint_b,
++        "two distinct conversations must publish distinct conversation_hints"
++    );
++
++    // A node bucketing all conversation-layer (global-topic) traffic by hint sees
++    // only opaque route-tags; none equals or contains either group_id.
++    let mut buckets: Vec<String> = all
++        .iter()
++        .filter(|(t, _)| t == GLOBAL_TOPIC)
++        .filter_map(|(_, w)| EnvelopeV1::decode(w.as_slice()).ok())
++        .map(|e| e.conversation_hint)
++        .collect();
++    buckets.sort();
++    buckets.dedup();
++    info!(bucket_count = buckets.len(), ?buckets, "opaque (topic,hint) buckets on global topic");
++    assert!(
++        buckets.len() >= 2,
++        "at least two opaque buckets expected (one per conversation)"
++    );
++    for b in &buckets {
++        assert_ne!(*b, convo_a, "no opaque bucket may equal a real group_id (A)");
++        assert_ne!(*b, convo_b, "no opaque bucket may equal a real group_id (B)");
++    }
++
++    // ---- Non-vacuity on REAL data: the search operates on live wire bytes ---
++    // The decoded hint we assert-absent-of-group-id IS itself present in the raw
++    // published envelope — proving Property 3's search runs over real content, not
++    // an empty buffer.
++    assert!(
++        contains_ascii_ci(&wire_a, &hint_a),
++        "sanity: the decoded hint must be found inside its own raw envelope"
++    );
++
++    // ---- Byte-level evidence for a human reviewer -------------------------
++    info!("================ BYTE-LEVEL EVIDENCE (convo A) ================");
++    info!(content_topic = %topic_a, "content_topic the node sees");
++    info!(convo_id = %convo_a, "convo_id (= hex group_id) the node must NOT recover");
++    info!(conversation_hint = %hint_a, "conversation_hint (opaque route_tag) on the wire");
++    info!(
++        payload_len = env_a.payload.len(),
++        payload_prefix = %hex::encode(&env_a.payload[..env_a.payload.len().min(24)]),
++        "sealed payload (ChaCha20-Poly1305: [12B nonce][ciphertext]) — pseudorandom"
++    );
++    info!(
++        group_id_raw_present = contains_bytes(&wire_a, &gid_a_raw),
++        group_id_hex_present = contains_ascii_ci(&wire_a, &convo_a),
++        "group_id absence in the full published envelope A"
++    );
++    info!("==============================================================");
++
++    println!("ADVERSARY EVIDENCE (convo A)");
++    println!("  content_topic       = {topic_a}");
++    println!("  convo_id (group_id) = {convo_a}");
++    println!("  conversation_hint   = {hint_a}");
++    println!("  hint == convo_id?     {}", hint_a == convo_a);
++    println!(
++        "  group_id raw in wire? {}",
++        contains_bytes(&wire_a, &gid_a_raw)
++    );
++    println!(
++        "  group_id hex in wire? {}",
++        contains_ascii_ci(&wire_a, &convo_a)
++    );
++    println!("  sealed payload len  = {}", env_a.payload.len());
++    println!(
++        "  sealed payload[..24]= {}",
++        hex::encode(&env_a.payload[..env_a.payload.len().min(24)])
++    );
++    println!("  --- convo B ---");
++    println!("  convo_id (group_id) = {convo_b}");
++    println!("  conversation_hint   = {hint_b}");
++    println!("  hint_a == hint_b?     {}", hint_a == hint_b);
++}
++
++/// Reproduces `GroupV1Convo::delivery_address_from_id` (the LEGACY per-conversation
++/// delivery address that Phase 1b replaced with the single global topic), so the
++/// test can assert it NEVER appears on the wire. Kept in sync by construction:
++/// Blake2b-48("delivery_addr|" || convo_id), hex-encoded.
++fn legacy_per_convo_topic(convo_id: &str) -> String {
++    use blake2::digest::consts::U6;
++    use blake2::{Blake2b, Digest};
++    let hash = Blake2b::<U6>::new()
++        .chain_update("delivery_addr|")
++        .chain_update(convo_id)
++        .finalize();
++    hex::encode(hash)
++}
+diff --git a/core/integration_tests_core/tests/test_graph_hiding_bootstrap.rs b/core/integration_tests_core/tests/test_graph_hiding_bootstrap.rs
+new file mode 100644
+index 0000000..b89777d
+--- /dev/null
++++ b/core/integration_tests_core/tests/test_graph_hiding_bootstrap.rs
+@@ -0,0 +1,175 @@
++//! #graph-hiding Phase 1b — BOOTSTRAP / invite-path wire analysis.
++//!
++//! The adversary test covers steady-state application messages. This test extends the
++//! same honest-but-curious node model to the GROUP-CREATION + Welcome/invite flow, and
++//! makes two claims — one positive, one an HONEST disclosure of a residual leak:
++//!
++//!   POSITIVE: across the entire bootstrap (create group -> Welcome to Raya, add member
++//!   -> Welcome to Pax, plus the sealed commits on the global topic) the raw group_id
++//!   (bytes AND hex, case-insensitive) never appears anywhere on the wire. The MLS
++//!   Welcome encrypts its GroupInfo, so the group_id is not exposed even at join time.
++//!
++//!   RESIDUAL (disclosed, not hidden): the invite rides a per-recipient INBOX topic
++//!   `delivery_address_for(recipient)` and carries `conversation_hint =
++//!   conversation_id_for(recipient)` — BOTH deterministic functions of the RECIPIENT's
++//!   signer id alone. So a node CAN observe "someone is inviting <this recipient>"
++//!   (who-is-being-invited linkability), keyed to the recipient. It still cannot learn
++//!   WHICH group (group_id absent) nor WHO the inviter is (no sender field on the wire).
++//!   We assert this residual explicitly so the boundary is pinned by a test, not prose.
++
++use chat_proto::logoschat::envelope::EnvelopeV1;
++use integration_tests_core::TestHarness;
++use prost::Message as _;
++
++const GLOBAL_TOPIC: &str = "peers-global-v1";
++
++/// True iff `needle` occurs as a contiguous byte-subsequence of `haystack`.
++fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
++    if needle.is_empty() || needle.len() > haystack.len() {
++        return false;
++    }
++    haystack.windows(needle.len()).any(|w| w == needle)
++}
++
++/// Case-insensitive ASCII substring search (for the hex form of the group id).
++fn contains_ascii_ci(haystack: &[u8], needle: &str) -> bool {
++    let hay = haystack.to_ascii_lowercase();
++    let need = needle.to_ascii_lowercase().into_bytes();
++    contains_bytes(&hay, &need)
++}
++
++/// Reproduces `inbox_v2::delivery_address_for` (the per-recipient inbox topic):
++/// Blake2b-32 (U4) of "InboxV2|" || "delivery_address|" || recipient_id, hex-encoded.
++fn inbox_delivery_address(id: &str) -> String {
++    use blake2::digest::consts::U4;
++    use blake2::{Blake2b, Digest};
++    let h = Blake2b::<U4>::new()
++        .chain_update("InboxV2|")
++        .chain_update("delivery_address|")
++        .chain_update(id)
++        .finalize();
++    hex::encode(h)
++}
++
++/// Reproduces `inbox_v2::conversation_id_for` (the inbox-frame hint):
++/// Blake2b-48 (U6) of "InboxV2|" || "conversation_id|" || recipient_id, hex-encoded.
++fn inbox_conversation_id(id: &str) -> String {
++    use blake2::digest::consts::U6;
++    use blake2::{Blake2b, Digest};
++    let h = Blake2b::<U6>::new()
++        .chain_update("InboxV2|")
++        .chain_update("conversation_id|")
++        .chain_update(id)
++        .finalize();
++    hex::encode(h)
++}
++
++#[test]
++fn bootstrap_and_invite_path_do_not_leak_group_id() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let raya_addr = harness.raya().addr();
++    let pax_addr = harness.pax().addr();
++
++    // Full bootstrap: create a named group (Welcome -> Raya), then add Pax
++    // (Welcome -> Pax). Both a create-time and an add-time invite are exercised.
++    let convo = harness
++        .saro()
++        .create_group_convo_v1(&[&raya_addr], "grp", "desc")
++        .expect("saro create group");
++    harness.process_until_label("raya join", |h| h.raya().convo_count() == 1);
++    harness
++        .saro()
++        .group_add_member(&convo, &[&pax_addr])
++        .expect("saro add pax");
++    harness.process_until_label("pax join", |h| h.pax().convo_count() == 1);
++
++    let gid_raw = hex::decode(&convo).expect("convo_id is hex(group_id)");
++
++    // Snapshot everything the node saw during bootstrap.
++    let all = harness.saro().ds().all_published();
++    assert!(!all.is_empty(), "bootstrap must have published wire traffic");
++
++    // ===================== POSITIVE: NO GROUP ID ON THE WIRE ===============
++    // Search EVERY published envelope — including the two Welcome/invite frames on
++    // the inbox topics — for the group_id (raw + hex, both cases).
++    for (i, (topic, wire)) in all.iter().enumerate() {
++        assert!(
++            !contains_bytes(wire, &gid_raw),
++            "LEAK: raw group_id bytes appear in bootstrap msg #{i} (topic={topic})"
++        );
++        assert!(
++            !contains_ascii_ci(wire, &convo),
++            "LEAK: group_id hex appears in bootstrap msg #{i} (topic={topic})"
++        );
++        assert!(
++            !contains_ascii_ci(wire, &convo.to_ascii_uppercase()),
++            "LEAK: group_id hex (uppercase) appears in bootstrap msg #{i} (topic={topic})"
++        );
++    }
++
++    // Enumerate the topics the node saw.
++    let mut topics: Vec<String> = all.iter().map(|(t, _)| t.clone()).collect();
++    topics.sort();
++    topics.dedup();
++
++    // The global conversation topic (sealed commits) must be present...
++    assert!(
++        topics.contains(&GLOBAL_TOPIC.to_string()),
++        "the global conversation topic must appear (sealed commits ride it)"
++    );
++
++    // ===================== RESIDUAL: PER-RECIPIENT INBOX TOPICS ============
++    // Both invitees' deterministic inbox topics MUST be present — this is the
++    // disclosed residual: the node sees a frame addressed to each recipient's inbox.
++    let raya_inbox = inbox_delivery_address(raya_addr.as_str());
++    let pax_inbox = inbox_delivery_address(pax_addr.as_str());
++    assert!(
++        topics.contains(&raya_inbox),
++        "Raya's create-time Welcome must ride her deterministic inbox topic ({raya_inbox})"
++    );
++    assert!(
++        topics.contains(&pax_inbox),
++        "Pax's add-time Welcome must ride his deterministic inbox topic ({pax_inbox})"
++    );
++
++    // The inbox topic is a pure function of the recipient's id — NOT of the group.
++    assert_ne!(raya_inbox, convo, "an inbox topic must not equal the group_id");
++    assert_ne!(pax_inbox, convo, "an inbox topic must not equal the group_id");
++
++    // Confirm the invite frame on Pax's inbox carries the recipient-derived hint,
++    // and that this hint is NOT the group_id (no group linkage from the hint).
++    let pax_invite = all
++        .iter()
++        .find(|(t, _)| *t == pax_inbox)
++        .map(|(_, w)| w.clone())
++        .expect("an invite frame on Pax's inbox topic");
++    let pax_hint = EnvelopeV1::decode(pax_invite.as_slice())
++        .expect("decode invite envelope")
++        .conversation_hint;
++    assert_eq!(
++        pax_hint,
++        inbox_conversation_id(pax_addr.as_str()),
++        "the invite frame's hint must be conversation_id_for(recipient) — recipient-derived"
++    );
++    assert_ne!(
++        pax_hint, convo,
++        "the invite hint must NOT be the group_id (no group linkage from the hint)"
++    );
++
++    // Honest boundary statement for a reviewer.
++    println!("BOOTSTRAP WIRE ANALYSIS");
++    println!("  group_id (never on wire)   = {convo}");
++    println!("  topics observed            = {topics:?}");
++    println!("  raya inbox topic (residual)= {raya_inbox}");
++    println!("  pax  inbox topic (residual)= {pax_inbox}");
++    println!("  pax invite hint (recip-derived, not group) = {pax_hint}");
++    println!(
++        "  RESIDUAL: node learns 'someone invited <recipient>' via the recipient's \
++         deterministic inbox topic/hint; it does NOT learn the group_id or the inviter."
++    );
++}
+diff --git a/core/integration_tests_core/tests/test_graph_hiding_epoch_stability.rs b/core/integration_tests_core/tests/test_graph_hiding_epoch_stability.rs
+new file mode 100644
+index 0000000..dac77fd
+--- /dev/null
++++ b/core/integration_tests_core/tests/test_graph_hiding_epoch_stability.rs
+@@ -0,0 +1,130 @@
++//! #graph-hiding Phase 1b — EPOCH-STABILITY test (the highest-value one).
++//!
++//! This proves the property that the earlier per-epoch MLS-exporter approach FAILED:
++//! the on-wire `conversation_hint` (route_tag) must NOT change when the group's MLS
++//! epoch advances (a member is added/removed). Phase 1b derives the route_tag +
++//! outer_key from a random secret carried in a GroupContext extension — epoch-STABLE
++//! and identical for every member — instead of the per-epoch exporter. If routing
++//! depended on the epoch, a commit would silently re-tag the conversation and break
++//! delivery (exactly the wall that killed the exporter spikes).
++//!
++//! We: create a real named group, capture the route_tag of a message BEFORE an epoch
++//! change, force an epoch change by ADDING a member (a real MLS commit — verified via
++//! the `group_epoch_for_test` hook, which reads the live `MlsGroup::epoch()`), then
++//! send again and assert (a) the route_tag is unchanged and (b) delivery still works.
++
++use chat_proto::logoschat::envelope::EnvelopeV1;
++use integration_tests_core::{TestClient, TestHarness};
++use prost::Message as _;
++
++/// The single global content-topic every GroupV1/DirectV1 conversation shares.
++const GLOBAL_TOPIC: &str = "peers-global-v1";
++
++/// Send exactly one application message on `convo` and return the
++/// (content_topic, conversation_hint) the delivery node would observe for it. Relies
++/// on `send_content` publishing exactly one sealed envelope (no commit on this path).
++fn send_and_capture_hint(sender: &mut TestClient, convo: &str, body: &[u8]) -> (String, String) {
++    let base = sender.ds().all_published().len();
++    sender.send_content(convo, body).expect("send_content");
++    let all = sender.ds().all_published();
++    assert_eq!(
++        all.len() - base,
++        1,
++        "send_content must publish exactly one wire envelope"
++    );
++    let (topic, wire) = all[base].clone();
++    let hint = EnvelopeV1::decode(wire.as_slice())
++        .expect("decode EnvelopeV1")
++        .conversation_hint;
++    (topic, hint)
++}
++
++#[test]
++fn route_tag_is_stable_across_an_epoch_change() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let raya_addr = harness.raya().addr();
++    let pax_addr = harness.pax().addr();
++
++    // Saro creates a real named group with Raya as the first member; settle join.
++    let convo = harness
++        .saro()
++        .create_group_convo_v1(&[&raya_addr], "grp", "desc")
++        .expect("saro create group");
++    harness.process_until_label("raya join", |h| h.raya().convo_count() == 1);
++
++    // Warm-up so the group is fully settled on both sides.
++    harness.saro().send_content(&convo, b"warm").expect("send warm");
++    harness.process_until(|h| h.raya().check(&convo, b"warm"));
++
++    let epoch_before = harness
++        .saro()
++        .group_epoch_for_test(&convo)
++        .expect("group cached on saro");
++
++    // ---- Capture the route_tag BEFORE the epoch change --------------------
++    let (topic_before, hint_before) =
++        send_and_capture_hint(harness.saro(), &convo, b"before-epoch");
++    assert_eq!(topic_before, GLOBAL_TOPIC, "pre-epoch send rides the global topic");
++    harness.process_until(|h| h.raya().check(&convo, b"before-epoch"));
++
++    // ---- Force an EPOCH CHANGE: add Pax (a real MLS Add commit) -----------
++    harness
++        .saro()
++        .group_add_member(&convo, &[&pax_addr])
++        .expect("saro add pax");
++    harness.process_until_label("pax join", |h| h.pax().convo_count() == 1);
++
++    let epoch_after = harness
++        .saro()
++        .group_epoch_for_test(&convo)
++        .expect("group cached on saro");
++    // PROVE the epoch actually advanced (this is a genuine epoch change, not a no-op).
++    assert!(
++        epoch_after > epoch_before,
++        "adding a member must advance the MLS epoch (before={epoch_before}, after={epoch_after})"
++    );
++
++    // ---- Capture the route_tag AFTER the epoch change ---------------------
++    let (topic_after, hint_after) = send_and_capture_hint(harness.saro(), &convo, b"after-epoch");
++    assert_eq!(topic_after, GLOBAL_TOPIC, "post-epoch send rides the global topic");
++
++    // ===================== PROPERTY (a): STABLE ROUTE_TAG ==================
++    // The conversation_hint is IDENTICAL across the epoch change. This is the exact
++    // property the per-epoch exporter approach could not guarantee.
++    assert_eq!(
++        hint_before, hint_after,
++        "route_tag/conversation_hint MUST be unchanged across an epoch change \
++         (before={hint_before}, after={hint_after})"
++    );
++
++    // ===================== PROPERTY (b): DELIVERY SURVIVES =================
++    // The post-epoch message must still reach BOTH the pre-existing member (Raya)
++    // and the newly-added member (Pax).
++    harness.process_until(|h| {
++        h.raya().check(&convo, b"after-epoch") && h.pax().check(&convo, b"after-epoch")
++    });
++    assert!(
++        harness.raya().check(&convo, b"after-epoch"),
++        "Raya (pre-existing member) must receive the post-epoch message"
++    );
++    assert!(
++        harness.pax().check(&convo, b"after-epoch"),
++        "Pax (added at the new epoch) must receive the post-epoch message"
++    );
++
++    // ---- Byte-level evidence for a human reviewer -------------------------
++    println!("EPOCH-STABILITY EVIDENCE");
++    println!("  mls_epoch before add = {epoch_before}");
++    println!(
++        "  mls_epoch after  add = {epoch_after}   (advanced: {})",
++        epoch_after > epoch_before
++    );
++    println!("  route_tag before     = {hint_before}");
++    println!("  route_tag after      = {hint_after}");
++    println!("  route_tag unchanged  = {}", hint_before == hint_after);
++}
+diff --git a/core/integration_tests_core/tests/test_graph_hiding_late_joiner.rs b/core/integration_tests_core/tests/test_graph_hiding_late_joiner.rs
+new file mode 100644
+index 0000000..b95c14c
+--- /dev/null
++++ b/core/integration_tests_core/tests/test_graph_hiding_late_joiner.rs
+@@ -0,0 +1,102 @@
++//! #graph-hiding Phase 1b — LATE-JOINER / cross-member secret agreement.
++//!
++//! A member added to a group AFTER creation receives the epoch-stable graph secret
++//! inside the (encrypted) Welcome's GroupContext extension. This test proves the late
++//! joiner derives the SAME route_tag/outer_key as the creator — i.e. the sealed-
++//! envelope secret really does propagate through the Welcome — by:
++//!   (1) asserting the creator's and the late joiner's published `conversation_hint`
++//!       for the same group are byte-for-byte identical, and
++//!   (2) showing messages flow BOTH ways (creator->joiner and joiner->creator),
++//!       which can only happen if both sides share the same outer_key + route_tag.
++
++use chat_proto::logoschat::envelope::EnvelopeV1;
++use integration_tests_core::{TestClient, TestHarness};
++use prost::Message as _;
++
++const GLOBAL_TOPIC: &str = "peers-global-v1";
++
++/// Send exactly one application message and return (content_topic, conversation_hint).
++fn send_and_capture_hint(sender: &mut TestClient, convo: &str, body: &[u8]) -> (String, String) {
++    let base = sender.ds().all_published().len();
++    sender.send_content(convo, body).expect("send_content");
++    let all = sender.ds().all_published();
++    assert_eq!(all.len() - base, 1, "send_content must publish exactly one envelope");
++    let (topic, wire) = all[base].clone();
++    let hint = EnvelopeV1::decode(wire.as_slice())
++        .expect("decode EnvelopeV1")
++        .conversation_hint;
++    (topic, hint)
++}
++
++#[test]
++fn late_joiner_derives_same_route_tag_and_messages_flow_both_ways() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let raya_addr = harness.raya().addr();
++    let pax_addr = harness.pax().addr();
++
++    // Saro creates a named group with Raya; settle Raya's join.
++    let convo = harness
++        .saro()
++        .create_group_convo_v1(&[&raya_addr], "grp", "desc")
++        .expect("saro create group");
++    harness.process_until_label("raya join", |h| h.raya().convo_count() == 1);
++
++    // Pax is added AFTER creation — the late joiner. It receives the graph secret
++    // via the Welcome's GroupContext extension.
++    harness
++        .saro()
++        .group_add_member(&convo, &[&pax_addr])
++        .expect("saro add pax (late joiner)");
++    harness.process_until_label("pax join", |h| h.pax().convo_count() == 1);
++
++    // ---- Creator's on-wire route_tag for this group -----------------------
++    let (topic_saro, hint_saro) = send_and_capture_hint(harness.saro(), &convo, b"from-saro");
++    assert_eq!(topic_saro, GLOBAL_TOPIC);
++    // Deliver Saro's message to both members (incl. the late joiner Pax).
++    harness.process_until(|h| {
++        h.raya().check(&convo, b"from-saro") && h.pax().check(&convo, b"from-saro")
++    });
++
++    // ---- Late joiner's on-wire route_tag for the SAME group ---------------
++    // (`all_published` reads the shared broadcast queue, so Pax's client sees the
++    // same global wire; capturing via Pax's handle is just for clarity.)
++    let (topic_pax, hint_pax) = send_and_capture_hint(harness.pax(), &convo, b"from-pax");
++    assert_eq!(topic_pax, GLOBAL_TOPIC);
++
++    // ===================== PROPERTY (1): SAME ROUTE_TAG ====================
++    // The late joiner derived the identical opaque route_tag from the secret it got
++    // in the Welcome — proving the GroupContext-extension secret propagated intact.
++    assert_eq!(
++        hint_saro, hint_pax,
++        "creator and late joiner must publish the SAME route_tag for the same group \
++         (saro={hint_saro}, pax={hint_pax})"
++    );
++
++    // ===================== PROPERTY (2): TWO-WAY DELIVERY ==================
++    // Pax's message reaches Saro and Raya; Saro's earlier message already reached Pax.
++    harness.process_until(|h| {
++        h.saro().check(&convo, b"from-pax") && h.raya().check(&convo, b"from-pax")
++    });
++    assert!(
++        harness.pax().check(&convo, b"from-saro"),
++        "late joiner Pax must RECEIVE the creator's message"
++    );
++    assert!(
++        harness.saro().check(&convo, b"from-pax"),
++        "creator Saro must RECEIVE the late joiner's message"
++    );
++    assert!(
++        harness.raya().check(&convo, b"from-pax"),
++        "original member Raya must RECEIVE the late joiner's message"
++    );
++
++    println!("LATE-JOINER SECRET-AGREEMENT EVIDENCE");
++    println!("  creator (saro) route_tag     = {hint_saro}");
++    println!("  late joiner (pax) route_tag  = {hint_pax}");
++    println!("  identical                    = {}", hint_saro == hint_pax);
++}
+diff --git a/core/integration_tests_core/tests/test_graph_hiding_scale.rs b/core/integration_tests_core/tests/test_graph_hiding_scale.rs
+new file mode 100644
+index 0000000..68b689f
+--- /dev/null
++++ b/core/integration_tests_core/tests/test_graph_hiding_scale.rs
+@@ -0,0 +1,151 @@
++//! #graph-hiding Phase 1b — N-CONVERSATION unlinkability at scale.
++//!
++//! The adversary test proves pairwise unlinkability (2 convos). This strengthens it:
++//! ONE sending client runs N>=3 conversations (a mix of 1:1 and group). We assert the
++//! honest-but-curious node, bucketing all global-topic traffic by (topic, hint), sees
++//! EXACTLY N distinct opaque buckets — one per conversation — all on the single global
++//! topic, none of which maps to (equals or contains) any real group_id. So adding more
++//! conversations yields only more opaque, mutually-unlinkable route-tags.
++
++use chat_proto::logoschat::envelope::EnvelopeV1;
++use integration_tests_core::{TestClient, TestHarness};
++use prost::Message as _;
++use std::collections::BTreeSet;
++
++const GLOBAL_TOPIC: &str = "peers-global-v1";
++
++fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
++    if needle.is_empty() || needle.len() > haystack.len() {
++        return false;
++    }
++    haystack.windows(needle.len()).any(|w| w == needle)
++}
++
++fn contains_ascii_ci(haystack: &[u8], needle: &str) -> bool {
++    let hay = haystack.to_ascii_lowercase();
++    let need = needle.to_ascii_lowercase().into_bytes();
++    contains_bytes(&hay, &need)
++}
++
++/// Send exactly one application message and return (content_topic, conversation_hint).
++fn send_and_capture_hint(sender: &mut TestClient, convo: &str, body: &[u8]) -> (String, String) {
++    let base = sender.ds().all_published().len();
++    sender.send_content(convo, body).expect("send_content");
++    let all = sender.ds().all_published();
++    assert_eq!(all.len() - base, 1, "send_content must publish exactly one envelope");
++    let (topic, wire) = all[base].clone();
++    let hint = EnvelopeV1::decode(wire.as_slice())
++        .expect("decode EnvelopeV1")
++        .conversation_hint;
++    (topic, hint)
++}
++
++#[test]
++fn n_conversations_yield_n_unlinkable_opaque_buckets() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<4>::new(|_, _| {});
++    let raya_addr = harness.raya().addr();
++    let pax_addr = harness.pax().addr();
++    let mira_addr = harness.mira().addr();
++
++    // N = 3 conversations for the SAME sender (Saro): two 1:1s + one named group.
++    let c1 = harness
++        .saro()
++        .create_direct_convo_v1(&[&raya_addr])
++        .expect("saro create direct with raya");
++    harness.process_until_label("raya join", |h| h.raya().convo_count() == 1);
++
++    let c2 = harness
++        .saro()
++        .create_direct_convo_v1(&[&pax_addr])
++        .expect("saro create direct with pax");
++    harness.process_until_label("pax join", |h| h.pax().convo_count() == 1);
++
++    let c3 = harness
++        .saro()
++        .create_group_convo_v1(&[&mira_addr], "grp", "desc")
++        .expect("saro create group with mira");
++    harness.process_until_label("mira join", |h| h.mira().convo_count() == 1);
++
++    let convos = [c1.clone(), c2.clone(), c3.clone()];
++    let distinct_ids: BTreeSet<&String> = convos.iter().collect();
++    assert_eq!(distinct_ids.len(), 3, "the three conversations must have distinct ids");
++
++    // ---- Send one app message on each, capturing its hint (back-to-back) ---
++    let (t1, hint1) = send_and_capture_hint(harness.saro(), &c1, b"m1");
++    let (t2, hint2) = send_and_capture_hint(harness.saro(), &c2, b"m2");
++    let (t3, hint3) = send_and_capture_hint(harness.saro(), &c3, b"m3");
++    for t in [&t1, &t2, &t3] {
++        assert_eq!(t, GLOBAL_TOPIC, "every conversation message rides the global topic");
++    }
++
++    // The three per-convo hints are distinct.
++    let hints: BTreeSet<String> = [hint1.clone(), hint2.clone(), hint3.clone()].into_iter().collect();
++    assert_eq!(hints.len(), 3, "the three conversations must publish three distinct hints");
++
++    // No hint equals or contains any group_id.
++    for hint in [&hint1, &hint2, &hint3] {
++        for c in &convos {
++            assert_ne!(hint, c, "a conversation_hint must never equal a group_id");
++            assert!(
++                !contains_ascii_ci(hint.as_bytes(), c),
++                "a conversation_hint must not contain a group_id hex"
++            );
++        }
++    }
++
++    // ===================== EXACTLY N OPAQUE BUCKETS =======================
++    // Bucket ALL global-topic traffic (the 3 setup commits + the 3 app sends) by
++    // hint. The node must see EXACTLY N=3 distinct opaque buckets — commit and app
++    // message for a convo share the one epoch-stable route_tag, so buckets == convos.
++    let all = harness.saro().ds().all_published();
++    let mut buckets: BTreeSet<String> = BTreeSet::new();
++    for (topic, wire) in all.iter().filter(|(t, _)| t == GLOBAL_TOPIC) {
++        let env = EnvelopeV1::decode(wire.as_slice()).expect("decode global-topic envelope");
++        // group_id (raw + hex) must be absent from every global-topic envelope.
++        for c in &convos {
++            let gid_raw = hex::decode(c).expect("convo_id is hex(group_id)");
++            assert!(
++                !contains_bytes(wire, &gid_raw),
++                "LEAK: raw group_id on the wire (topic={topic})"
++            );
++            assert!(
++                !contains_ascii_ci(wire, c),
++                "LEAK: group_id hex on the wire (topic={topic})"
++            );
++        }
++        buckets.insert(env.conversation_hint);
++    }
++    assert_eq!(
++        buckets.len(),
++        convos.len(),
++        "the node must see exactly N opaque (topic,hint) buckets on the global topic \
++         (N={}, observed={})",
++        convos.len(),
++        buckets.len()
++    );
++    // Every bucket is opaque: none equals a real group_id.
++    for b in &buckets {
++        for c in &convos {
++            assert_ne!(b, c, "no opaque bucket may equal a real group_id");
++        }
++    }
++    // The per-send hints are exactly the bucket set (sanity: buckets are the convos').
++    assert_eq!(buckets, hints, "the N buckets must be exactly the N per-convo route_tags");
++
++    // ---- The graph is genuine: every message actually delivers -----------
++    harness.process_until(|h| {
++        h.raya().check(&c1, b"m1") && h.pax().check(&c2, b"m2") && h.mira().check(&c3, b"m3")
++    });
++    assert!(harness.raya().check(&c1, b"m1"));
++    assert!(harness.pax().check(&c2, b"m2"));
++    assert!(harness.mira().check(&c3, b"m3"));
++
++    println!("N-CONVERSATION UNLINKABILITY EVIDENCE (N={})", convos.len());
++    println!("  global-topic opaque buckets = {buckets:?}");
++    println!("  group_ids (never in buckets) = {convos:?}");
++}
 diff --git a/core/sqlite/src/lib.rs b/core/sqlite/src/lib.rs
-index b021965..fb42c1e 100644
+index b021965..3d2e20e 100644
 --- a/core/sqlite/src/lib.rs
 +++ b/core/sqlite/src/lib.rs
 @@ -11,7 +11,7 @@ use crypto::{Identity, PrivateKey};
@@ -2467,7 +4068,62 @@ index b021965..fb42c1e 100644
  impl EphemeralKeyStore for ChatStorage {
      /// Saves an ephemeral key pair to storage.
      fn save_ephemeral_key(
-@@ -536,11 +570,29 @@ fn blob_to_array<const N: usize>(
+@@ -186,8 +220,8 @@ impl ConversationStore for ChatStorage {
+     /// Saves conversation metadata.
+     fn save_conversation(&mut self, meta: &ConversationMeta) -> Result<(), StorageError> {
+         self.db.connection().execute(
+-            "INSERT OR REPLACE INTO conversations (local_convo_id, remote_convo_id, convo_type) VALUES (?1, ?2, ?3)",
+-            params![meta.local_convo_id, meta.remote_convo_id, meta.kind.as_str()],
++            "INSERT OR REPLACE INTO conversations (local_convo_id, remote_convo_id, convo_type, route_tag) VALUES (?1, ?2, ?3, ?4)",
++            params![meta.local_convo_id, meta.remote_convo_id, meta.kind.as_str(), meta.route_tag],
+         )
+         .map_err(map_rusqlite_error)?;
+         Ok(())
+@@ -202,7 +236,7 @@ impl ConversationStore for ChatStorage {
+             .db
+             .connection()
+             .prepare(
+-                "SELECT local_convo_id, remote_convo_id, convo_type FROM conversations WHERE local_convo_id = ?1",
++                "SELECT local_convo_id, remote_convo_id, convo_type, route_tag FROM conversations WHERE local_convo_id = ?1",
+             )
+             .map_err(map_rusqlite_error)?;
+ 
+@@ -210,10 +244,12 @@ impl ConversationStore for ChatStorage {
+             let local_convo_id: String = row.get(0)?;
+             let remote_convo_id: String = row.get(1)?;
+             let convo_type: String = row.get(2)?;
++            let route_tag: Option<String> = row.get(3)?;
+             Ok(ConversationMeta {
+                 local_convo_id,
+                 remote_convo_id,
+                 kind: ConversationKind::from(convo_type.as_str()),
++                route_tag,
+             })
+         });
+ 
+@@ -237,7 +273,7 @@ impl ConversationStore for ChatStorage {
+         let mut stmt = self
+             .db
+             .connection()
+-            .prepare("SELECT local_convo_id, remote_convo_id, convo_type FROM conversations")
++            .prepare("SELECT local_convo_id, remote_convo_id, convo_type, route_tag FROM conversations")
+             .map_err(map_rusqlite_error)?;
+ 
+         let records = stmt
+@@ -245,10 +281,12 @@ impl ConversationStore for ChatStorage {
+                 let local_convo_id: String = row.get(0)?;
+                 let remote_convo_id: String = row.get(1)?;
+                 let convo_type: String = row.get(2)?;
++                let route_tag: Option<String> = row.get(3)?;
+                 Ok(ConversationMeta {
+                     local_convo_id,
+                     remote_convo_id,
+                     kind: ConversationKind::from(convo_type.as_str()),
++                    route_tag,
+                 })
+             })
+             .map_err(map_rusqlite_error)?
+@@ -536,11 +574,29 @@ fn blob_to_array<const N: usize>(
  mod tests {
      use storage::{
          ConversationKind, ConversationMeta, ConversationStore, EphemeralKeyStore, IdentityStore,
@@ -2498,17 +4154,46 @@ index b021965..fb42c1e 100644
      #[test]
      fn test_identity_roundtrip() {
          let mut storage = ChatStorage::new(StorageConfig::InMemory).unwrap();
+@@ -593,6 +649,7 @@ mod tests {
+                 local_convo_id: "local_1".into(),
+                 remote_convo_id: "remote_1".into(),
+                 kind: ConversationKind::GroupV1,
++                route_tag: None,
+             })
+             .unwrap();
+         storage
+@@ -600,6 +657,7 @@ mod tests {
+                 local_convo_id: "local_2".into(),
+                 remote_convo_id: "remote_2".into(),
+                 kind: ConversationKind::GroupV1,
++                route_tag: Some("deadbeef".into()),
+             })
+             .unwrap();
+ 
+@@ -613,6 +671,8 @@ mod tests {
+         assert_eq!(convos[0].local_convo_id, "local_2");
+         assert_eq!(convos[0].remote_convo_id, "remote_2");
+         assert_eq!(convos[0].kind.as_str(), "group_v1");
++        // #339: route_tag persists through the sqlite round-trip (incl. NULL/None).
++        assert_eq!(convos[0].route_tag.as_deref(), Some("deadbeef"));
+     }
+ 
+     #[test]
 diff --git a/core/sqlite/src/migrations.rs b/core/sqlite/src/migrations.rs
-index 439f9fc..fafc016 100644
+index 439f9fc..ae90312 100644
 --- a/core/sqlite/src/migrations.rs
 +++ b/core/sqlite/src/migrations.rs
-@@ -19,6 +19,10 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
+@@ -19,6 +19,14 @@ pub fn get_migrations() -> Vec<(&'static str, &'static str)> {
              "002_ratchet_state",
              include_str!("migrations/002_ratchet_state.sql"),
          ),
 +        (
 +            "003_mls_state",
 +            include_str!("migrations/003_mls_state.sql"),
++        ),
++        (
++            "004_route_tag",
++            include_str!("migrations/004_route_tag.sql"),
 +        ),
      ]
  }
@@ -2530,6 +4215,16 @@ index 0000000..fcd0d21
 +    state BLOB NOT NULL,
 +    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 +);
+diff --git a/core/sqlite/src/migrations/004_route_tag.sql b/core/sqlite/src/migrations/004_route_tag.sql
+new file mode 100644
+index 0000000..0038ab3
+--- /dev/null
++++ b/core/sqlite/src/migrations/004_route_tag.sql
+@@ -0,0 +1,4 @@
++-- #339: persist the sealed-envelope route_tag so the Core route_index can be
++-- rebuilt at startup without loading every MLS group. Nullable: GroupV2 rows and
++-- pre-#339 rows have no tag (the Core falls back to deriving it from the group).
++ALTER TABLE conversations ADD COLUMN route_tag TEXT;
 diff --git a/core/storage/src/lib.rs b/core/storage/src/lib.rs
 index 6c8f367..653dd57 100644
 --- a/core/storage/src/lib.rs
@@ -2542,7 +4237,7 @@ index 6c8f367..653dd57 100644
 +    IdentityStore, MlsStateStore, RatchetStateRecord, RatchetStore, SkippedKeyRecord,
  };
 diff --git a/core/storage/src/store.rs b/core/storage/src/store.rs
-index d05b05a..0f74993 100644
+index d05b05a..539a451 100644
 --- a/core/storage/src/store.rs
 +++ b/core/storage/src/store.rs
 @@ -23,10 +23,26 @@ pub trait EphemeralKeyStore {
@@ -2588,7 +4283,19 @@ index d05b05a..0f74993 100644
              other => Self::Unknown(other.to_string()),
          }
      }
-@@ -122,7 +140,12 @@ pub trait RatchetStore {
+@@ -52,6 +70,11 @@ pub struct ConversationMeta {
+     pub local_convo_id: String,
+     pub remote_convo_id: String,
+     pub kind: ConversationKind,
++    /// #339: opaque route_tag for the sealed global-topic path, persisted so the
++    /// `Core` route_index rebuilds at startup WITHOUT loading every MLS group. `None`
++    /// for kinds not on the sealed path (GroupV2) or pre-#339 rows (fall back to
++    /// deriving it from the loaded group).
++    pub route_tag: Option<String>,
+ }
+ 
+ pub trait ConversationStore {
+@@ -122,7 +145,12 @@ pub trait RatchetStore {
  
  // TODO: (P2) this should be defined in the ConversationType
  
@@ -3398,6 +5105,34 @@ index 0cf5987..9725aaa 100644
          let url = format!(
              "{}/v0/account/{}",
              self.base_url,
+diff --git a/extensions/components/src/delivery/local_broadcaster.rs b/extensions/components/src/delivery/local_broadcaster.rs
+index 5034408..f906848 100644
+--- a/extensions/components/src/delivery/local_broadcaster.rs
++++ b/extensions/components/src/delivery/local_broadcaster.rs
+@@ -90,6 +90,23 @@ impl LocalBroadcaster {
+         }
+     }
+ 
++    /// Adversary / test capture: every message ever published to the shared
++    /// broadcast queue, as an honest-but-curious delivery node would observe it on
++    /// the wire — the pair `(content_topic == delivery_address, raw envelope bytes)`.
++    ///
++    /// Deliberately independent of any consumer's `cursor`, `subscriptions`, or the
++    /// self-echo (`outbound_msgs`) filter: a node watching the transport sees ALL
++    /// traffic regardless of who subscribed to what. Used by the graph-hiding
++    /// adversary test to prove the node cannot recover the conversation graph.
++    pub fn all_published(&self) -> Vec<(String, Vec<u8>)> {
++        self.shared
++            .borrow()
++            .messages
++            .iter()
++            .map(|ae| (ae.delivery_address.clone(), ae.data.clone()))
++            .collect()
++    }
++
+     fn msg_id(msg: &AddressedEnvelope) -> u64 {
+         let mut hasher = DefaultHasher::new();
+         msg.data.as_slice().hash(&mut hasher);
 diff --git a/extensions/components/src/storage/in_memory_store.rs b/extensions/components/src/storage/in_memory_store.rs
 index 2bf84f9..009d6ea 100644
 --- a/extensions/components/src/storage/in_memory_store.rs

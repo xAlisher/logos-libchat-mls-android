@@ -73,6 +73,10 @@ grep -q 'removes_authorized' core/conversations/src/conversation/group_v1.rs \
 # #350 auto-recovery silently reverts to stranding desynced members.
 grep -q 'replace_old_group' core/conversations/src/conversation/group_v1.rs \
   || { echo "#437 replace-on-desync welcome path missing"; exit 1; }
+# #437 security: the replace-on-desync path must stay creator-gated (author check) —
+# fail the build if the gate is gone, else a non-creator fork could replace a group.
+grep -q 'creator_credential_of' core/conversations/src/conversation/group_v1.rs \
+  || { echo "#437 creator-authored replace gate missing"; exit 1; }
 
 echo "==> 3/6 NDK + aws-lc-rs + delivery-node env"
 export CC_aarch64_linux_android=$CLANG

@@ -1,56 +1,133 @@
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
-@@ -223,14 +223,44 @@
+@@ -152,6 +152,29 @@
+         })
+ }
+ 
++/// #349/#437: the group creator's leaf-credential content, read from a group's
++/// authenticated group-context metadata extension (`ConvoMetaInfo::creator`).
++/// `None` for a 1-1 delegate (no metadata) or a pre-#349 group (no recorded
++/// creator). Authenticated: GroupContext extensions are covered by the
++/// confirmation tag and identical for every member, so a peer cannot forge this.
++/// Free function so both #349's removal gate and #437's replace-on-desync author
++/// check can read it from any loaded `MlsGroup` (not just a live `GroupV1Convo`).
++fn creator_credential_of(group: &MlsGroup) -> Option<Vec<u8>> {
++    group
++        .extensions()
++        .iter()
++        .find_map(|ext| {
++            if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
++                && *ext_type == GROUP_METADATA_EXTENSION_TYPE
++            {
++                return ConvoMetaInfo::from_extension_bytes(bytes).ok();
++            }
++            None
++        })
++        .map(|meta| meta.creator().to_vec())
++        .filter(|creator| !creator.is_empty())
++}
++
+ impl std::fmt::Debug for GroupV1Convo {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         f.debug_struct("GroupV1Convo")
+@@ -223,13 +246,73 @@
          // `.unwrap()` here panics on a worker thread and SIGSEGVs the whole
          // process. This fires routinely via the store catch-up replaying an old
          // welcome into a phone that already holds the group.
 -        let mls_group =
 +        let join_builder =
              StagedWelcome::build_from_welcome(&cx.mls_provider, &Self::mls_join_config(), welcome)
--                .map_err(ChatError::generic)?
--                .build()
--                .map_err(ChatError::generic)?
--                .into_group(&cx.mls_provider)
-                 .map_err(ChatError::generic)?;
- 
++                .map_err(ChatError::generic)?;
++
 +        // #437 replace-on-desync: an MLS re-add (the #350 desync recovery) reuses the
 +        // SAME group_id. A desynced/evicted member still holds that group_id locally,
 +        // so without this the fresh re-add welcome hits the GroupAlreadyExists path
 +        // above and is dropped as a benign duplicate — stranding the member out of the
 +        // group forever (they keep failing to send: "used a group after being evicted").
-+        // Distinguish the recovery welcome from a genuine replay by EPOCH: the recovery
-+        // welcome is at a strictly NEWER epoch than our stuck local copy, whereas a
-+        // replayed/duplicate welcome (store catch-up re-delivering the original) carries
-+        // the same-or-older epoch we already hold. On strictly-newer we adopt the fresh
-+        // group (`replace_old_group`); otherwise keep the fail-as-error behavior so a
-+        // stale replay can never clobber a healthy group.
++        //
++        // Adopting a newer welcome for a group we already hold is a state REPLACEMENT,
++        // so it is gated like #349's removal — an MLS epoch is only a number, not proof
++        // the incoming state descends from ours, and adds are not creator-gated, so
++        // epoch alone would let any member fork the group and force-replace our state
++        // with a valid higher-epoch welcome. We replace only when BOTH hold:
++        //   (a) strictly-NEWER epoch than our stuck local copy (a genuine recovery, not a
++        //       store-replayed duplicate of the original welcome, which is same/older), and
++        //   (b) the welcome was AUTHORED by the same creator recorded in our existing
++        //       group's authenticated group-context metadata (#349 `creator`) — i.e. the
++        //       only party #350 lets drive a remove-then-add.
++        // Anything else keeps the fail-as-error path so a stale replay or a non-creator
++        // fork can never clobber a healthy group.
 +        let group_info = join_builder.processed_welcome().unverified_group_info();
 +        let incoming_gid = group_info.group_id().clone();
 +        let incoming_epoch = group_info.epoch();
-+        let replace_stale = matches!(
-+            MlsGroup::load(cx.mls_provider.storage(), &incoming_gid),
-+            Ok(Some(existing)) if incoming_epoch > existing.epoch()
-+        );
-+        let join_builder = if replace_stale {
++        let existing = MlsGroup::load(cx.mls_provider.storage(), &incoming_gid)
++            .map_err(ChatError::generic)?;
++        let newer_epoch = existing
++            .as_ref()
++            .is_some_and(|g| incoming_epoch > g.epoch());
++
++        let mls_group = if newer_epoch {
++            // Recovery candidate. Building the StagedWelcome VALIDATES the welcome and
++            // writes NOTHING to storage (persistence is entirely in `into_group`), so we
++            // can authenticate the author and only then commit — an unauthorized welcome
++            // is dropped with our old group untouched.
++            let creator = existing.as_ref().and_then(creator_credential_of);
++            let staged = join_builder
++                .replace_old_group()
++                .build()
++                .map_err(ChatError::generic)?;
++            let author = staged
++                .welcome_sender()
++                .map(|leaf| leaf.credential().serialized_content().to_vec())
++                .map_err(ChatError::generic)?;
++            if creator.as_deref() != Some(author.as_slice()) {
++                // Pre-#349 group (no recorded creator) or a non-creator author → refuse.
++                // Surface as an "already exists" error so the inbound pipeline treats it
++                // as the benign duplicate it must not act on (matches the replay path).
++                return Err(ChatError::generic(
++                    "group with this groupid already exists: re-add welcome not authored by creator",
++                ));
++            }
 +            debug!(
 +                group = %hex::encode(incoming_gid.as_slice()),
-+                "groupv1: adopting newer re-add welcome over desynced group (#437)"
++                "groupv1: adopting creator-authored newer re-add welcome over desynced group (#437)"
 +            );
-+            join_builder.replace_old_group()
++            staged
++                .into_group(&cx.mls_provider)
+                 .map_err(ChatError::generic)?
 +        } else {
 +            join_builder
+                 .build()
+                 .map_err(ChatError::generic)?
+                 .into_group(&cx.mls_provider)
+-                .map_err(ChatError::generic)?;
++                .map_err(ChatError::generic)?
 +        };
-+
-+        let mls_group = join_builder
-+            .build()
-+            .map_err(ChatError::generic)?
-+            .into_group(&cx.mls_provider)
-+            .map_err(ChatError::generic)?;
-+
+ 
          let convo_id = hex::encode(mls_group.group_id().as_slice());
          let (outer_key, route_tag) = Self::seal_material(&mls_group);
-         // Phase 1: every convo subscribes the single global topic (idempotent).
+@@ -467,19 +550,7 @@
+     /// are identical for every member, so this cannot be forged by a peer. It can only
+     /// change through a GroupContextExtensions commit, which this client never sends.
+     fn creator_credential(&self) -> Option<Vec<u8>> {
+-        self.mls_group
+-            .extensions()
+-            .iter()
+-            .find_map(|ext| {
+-                if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
+-                    && *ext_type == GROUP_METADATA_EXTENSION_TYPE
+-                {
+-                    return ConvoMetaInfo::from_extension_bytes(bytes).ok();
+-                }
+-                None
+-            })
+-            .map(|meta| meta.creator().to_vec())
+-            .filter(|creator| !creator.is_empty())
++        creator_credential_of(&self.mls_group)
+     }
+ 
+     /// The leaf-credential content at `index` in the CURRENT (pre-merge) roster.
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
 --- a/core/conversations/src/core.rs
 +++ b/core/conversations/src/core.rs
@@ -76,7 +153,7 @@ diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
  
              Ok(PayloadOutcome::Inbox(InboxOutcome {
                  new_conversation: crate::NewConversation { convo_id, class },
-@@ -767,6 +778,24 @@
+@@ -767,6 +778,34 @@
          }
      }
  
@@ -88,6 +165,16 @@ diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
 +    /// duplicate that `register_convo` guards against on the create paths.
 +    fn replace_convo(&mut self, convo: ConvoTypeOwned<S>) {
 +        let id = convo.id().to_string();
++        // #437: the route_tag is derived per-epoch, so the convo we're replacing has a
++        // STALE tag that would otherwise linger in the index pointing at this id. Drop it
++        // before indexing the fresh one, so a later frame can't resolve via the dead tag.
++        let stale_tag = self.cached_convos.get(&id).and_then(|old| match old {
++            ConvoTypeOwned::Group(c) => c.route_tag(),
++            ConvoTypeOwned::Direct(c) => c.route_tag(),
++        });
++        if let Some(stale_tag) = stale_tag {
++            self.route_index.remove(&stale_tag);
++        }
 +        let tag = match &convo {
 +            ConvoTypeOwned::Group(c) => c.route_tag(),
 +            ConvoTypeOwned::Direct(c) => c.route_tag(),

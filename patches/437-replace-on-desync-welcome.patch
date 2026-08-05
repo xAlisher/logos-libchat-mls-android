@@ -1,0 +1,103 @@
+diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
+--- a/core/conversations/src/conversation/group_v1.rs
++++ b/core/conversations/src/conversation/group_v1.rs
+@@ -223,14 +223,44 @@
+         // `.unwrap()` here panics on a worker thread and SIGSEGVs the whole
+         // process. This fires routinely via the store catch-up replaying an old
+         // welcome into a phone that already holds the group.
+-        let mls_group =
++        let join_builder =
+             StagedWelcome::build_from_welcome(&cx.mls_provider, &Self::mls_join_config(), welcome)
+-                .map_err(ChatError::generic)?
+-                .build()
+-                .map_err(ChatError::generic)?
+-                .into_group(&cx.mls_provider)
+                 .map_err(ChatError::generic)?;
+ 
++        // #437 replace-on-desync: an MLS re-add (the #350 desync recovery) reuses the
++        // SAME group_id. A desynced/evicted member still holds that group_id locally,
++        // so without this the fresh re-add welcome hits the GroupAlreadyExists path
++        // above and is dropped as a benign duplicate — stranding the member out of the
++        // group forever (they keep failing to send: "used a group after being evicted").
++        // Distinguish the recovery welcome from a genuine replay by EPOCH: the recovery
++        // welcome is at a strictly NEWER epoch than our stuck local copy, whereas a
++        // replayed/duplicate welcome (store catch-up re-delivering the original) carries
++        // the same-or-older epoch we already hold. On strictly-newer we adopt the fresh
++        // group (`replace_old_group`); otherwise keep the fail-as-error behavior so a
++        // stale replay can never clobber a healthy group.
++        let group_info = join_builder.processed_welcome().unverified_group_info();
++        let incoming_gid = group_info.group_id().clone();
++        let incoming_epoch = group_info.epoch();
++        let replace_stale = matches!(
++            MlsGroup::load(cx.mls_provider.storage(), &incoming_gid),
++            Ok(Some(existing)) if incoming_epoch > existing.epoch()
++        );
++        let join_builder = if replace_stale {
++            debug!(
++                group = %hex::encode(incoming_gid.as_slice()),
++                "groupv1: adopting newer re-add welcome over desynced group (#437)"
++            );
++            join_builder.replace_old_group()
++        } else {
++            join_builder
++        };
++
++        let mls_group = join_builder
++            .build()
++            .map_err(ChatError::generic)?
++            .into_group(&cx.mls_provider)
++            .map_err(ChatError::generic)?;
++
+         let convo_id = hex::encode(mls_group.group_id().as_slice());
+         let (outer_key, route_tag) = Self::seal_material(&mls_group);
+         // Phase 1: every convo subscribes the single global topic (idempotent).
+diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
+--- a/core/conversations/src/core.rs
++++ b/core/conversations/src/core.rs
+@@ -686,8 +686,19 @@
+     fn dispatch_to_inbox2(&mut self, payload: &[u8]) -> Result<PayloadOutcome, ChatError> {
+         if let Some((convo, class)) = self.pq_inbox.handle_frame(&mut self.services, payload)? {
+             let convo_id = convo.id().to_string();
+-            // Cache convos created by InboxV2
+-            self.register_convo(ConvoTypeOwned::Group(convo))?;
++            // #437: a welcome for a convo we ALREADY hold reaches here only when the
++            // native welcome path adopted a STRICTLY-NEWER epoch (a #350 re-add
++            // resync) — a genuine duplicate welcome errors earlier as
++            // GroupAlreadyExists and never gets this far. So an existing id here is
++            // the recovery case: overwrite the stale cached convo in place instead of
++            // erroring "Convo already exists", and still surface it as a
++            // new_conversation so the app maps it to the existing thread, fires
++            // group_ready, and clears the desync notice.
++            if self.cached_convos.contains_key(&convo_id) {
++                self.replace_convo(ConvoTypeOwned::Group(convo));
++            } else {
++                self.register_convo(ConvoTypeOwned::Group(convo))?;
++            }
+ 
+             Ok(PayloadOutcome::Inbox(InboxOutcome {
+                 new_conversation: crate::NewConversation { convo_id, class },
+@@ -767,6 +778,24 @@
+         }
+     }
+ 
++    /// #437: overwrite an already-cached convo with a freshly-adopted one — the
++    /// #350 desync re-add resync path. Unlike `register_convo` this EXPECTS the id
++    /// to already exist (the stale, epoch-desynced copy) and replaces it in place,
++    /// refreshing the route_index too. Used only for a re-add welcome the native
++    /// layer accepted at a strictly-newer epoch, so it never masks the accidental
++    /// duplicate that `register_convo` guards against on the create paths.
++    fn replace_convo(&mut self, convo: ConvoTypeOwned<S>) {
++        let id = convo.id().to_string();
++        let tag = match &convo {
++            ConvoTypeOwned::Group(c) => c.route_tag(),
++            ConvoTypeOwned::Direct(c) => c.route_tag(),
++        };
++        if let Some(tag) = tag {
++            self.route_index.insert(tag, id.clone());
++        }
++        self.cached_convos.insert(id, convo);
++    }
++
+     /// Rebuilds a conversation from storage — the one site that branches on
+     /// `ConversationKind`.
+     fn load_convo(&mut self, convo_id: &str) -> Result<Box<dyn Convo<S>>, ChatError> {

@@ -49,7 +49,7 @@ if ! grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/buil
   # `git checkout -f` above reverts TRACKED files but leaves the files the patch
   # ADDS behind as untracked, so a re-run on an existing BUILD_DIR would die with
   # "already exists in working directory". Drop exactly the patch's created files.
-  for p in libchat-android-arm64 349-groupv1-remove-member; do
+  for p in libchat-android-arm64 349-groupv1-remove-member 437-replace-on-desync-welcome; do
     git apply --summary "$REPO_DIR/patches/$p.patch" \
       | awk '/^ create mode /{print $4}' | xargs -r rm -f
   done
@@ -58,6 +58,10 @@ if ! grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/buil
   # separate patch so it never risks corrupting the main graph-hiding monolith).
   # Carries the receive-side removal-authorization gate + its tests.
   git apply "$REPO_DIR/patches/349-groupv1-remove-member.patch"
+  # #437: replace-on-desync — a re-add welcome at a strictly newer epoch adopts the
+  # fresh group instead of erroring GroupAlreadyExists, so #350 recovery actually
+  # resyncs a desynced member (applied after 349; touches the same file).
+  git apply "$REPO_DIR/patches/437-replace-on-desync-welcome.patch"
 fi
 grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs \
   || { echo "patch did not apply"; exit 1; }
@@ -65,6 +69,10 @@ grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs 
 # patch landed without it rather than shipping a silently unenforced removal.
 grep -q 'removes_authorized' core/conversations/src/conversation/group_v1.rs \
   || { echo "#349 removal-authorization gate missing"; exit 1; }
+# #437: fail the build if the replace-on-desync recovery path didn't land — else
+# #350 auto-recovery silently reverts to stranding desynced members.
+grep -q 'replace_old_group' core/conversations/src/conversation/group_v1.rs \
+  || { echo "#437 replace-on-desync welcome path missing"; exit 1; }
 
 echo "==> 3/6 NDK + aws-lc-rs + delivery-node env"
 export CC_aarch64_linux_android=$CLANG

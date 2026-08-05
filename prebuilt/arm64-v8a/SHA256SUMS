@@ -7,7 +7,7 @@
 #
 # Verify:  sha256sum -c SHA256SUMS
 #
-# liblogoschat.so 6b12a4fb... is the #348 + #349 + #437 build:
+# liblogoschat.so 84b751c2... is the #348 + #349 + #437 build:
 #   upstream logos-messaging/libchat @ d2124fd
 #   + patches/libchat-android-arm64.patch
 #   + patches/349-groupv1-remove-member.patch
@@ -15,14 +15,35 @@
 #   built by scripts/build-android-arm64.sh (NDK r27, aarch64-linux-android,
 #   release, then `llvm-strip --strip-unneeded`); 25 exported logoschat_* symbols.
 #
-# It supersedes 6dd23bc7e93e94c35ba5fb913dc0b65217b67dc6df1911880e30b254389fef31,
-# which this file published at 04bc30d, and which carries the SAME 25 exported
-# symbols but an UNGATED replace-on-desync path: it adopts any newer re-add
-# Welcome, not only one authored by the recorded group creator. The gate landed
-# in 7bbfaee and its unit tests in 10518fe (`replace_authorized`); the build
-# published here is the first artifact that contains them. That is a security
-# difference with no ABI signal, which is exactly why the hash has to move with
-# it -- do not restore 6dd23bc7.
+# It supersedes 6b12a4fb4633005dcabf2e0f06a27b1f30be3ccc9aecc786ab4de2946e398515,
+# which this file published at 70a7743..01fced9. That build gated
+# replace-on-desync on the welcome author's CREDENTIAL CONTENT bytes; 01fced9
+# rebound the gate to the author's authenticated `signature_key` (the recorded
+# creator id is hex(Ed25519 verifying key)), because a peer can copy the
+# creator's id into a credential but cannot sign a leaf with the creator's
+# private key. 84b751c2 is the first published artifact carrying that.
+#
+# PUBLISHED LATE, and that is the lesson: 01fced9 changed the gate's SOURCE but
+# left this file naming 6b12a4fb, so for the length of peers#436's review the
+# consumer bundled a binary NO revision of this repo stood behind. A source-only
+# commit that changes what the .so does is half a change -- publish in the same
+# commit.
+#
+# Both supersede 6dd23bc7e93e94c35ba5fb913dc0b65217b67dc6df1911880e30b254389fef31,
+# which this file published at 04bc30d..10518fe, and which carries the SAME 25
+# exported symbols but an UNGATED replace-on-desync path: it adopts any newer
+# re-add Welcome, not only one authored by the recorded group creator. The gate
+# landed in 7bbfaee and its unit tests in 10518fe (`replace_authorized`). That is
+# a security difference with no ABI signal, which is exactly why the hash has to
+# move with it -- do not restore 6dd23bc7.
+#
+# Note what a consumer's string/marker check can and cannot separate: 6dd23bc7
+# logs the UNGATED 'groupv1: adopting newer re-add welcome ...' line, while both
+# 6b12a4fb and 84b751c2 log 'adopting creator-authored newer re-add welcome ...'
+# plus the refusal 're-add welcome not authored by creator'. So markers separate
+# gated from ungated, but NOT signature_key-gated from credential-byte-gated --
+# those two differ only in comparison semantics, with no string and no ABI
+# signal. Only this hash distinguishes them.
 #
 # Both also supersede 8f4fbdc60c0f13e245eb9c65cf1ad248699c843532ab59cbb6ad0e6dafe9bcb6,
 # which this file published up to 6b6305f and which PREDATES all three patches
@@ -47,6 +68,6 @@
 # xAlisher/logos-libdelivery-android purely as build-time link inputs here; the
 # app ships that repo's own published copies, which may be newer.
 e69496a4aeb51ebe61d0775ae9fefc76eee640f12317aa5174da67e5d4ec8fd6  libc++_shared.so
-6b12a4fb4633005dcabf2e0f06a27b1f30be3ccc9aecc786ab4de2946e398515  liblogoschat.so
+84b751c2a2c623b5e610c894e19a47374819d1c05babef4c82afc3977f4a216f  liblogoschat.so
 58c766b9d7463c4973bbda86925bc9fee9d32547c49898bdbe8dad8256b0e495  liblogosdelivery.so
 766bd58a36f9233a4647bcba16f9192a6cb691a211950401b8e0d6c826478e45  librln.so

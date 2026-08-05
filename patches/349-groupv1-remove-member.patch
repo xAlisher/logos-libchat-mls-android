@@ -1,0 +1,1048 @@
+diff --git a/core/conversations/src/conversation.rs b/core/conversations/src/conversation.rs
+index 95f90fd..7137fc0 100644
+--- a/core/conversations/src/conversation.rs
++++ b/core/conversations/src/conversation.rs
+@@ -100,6 +100,36 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
+         ))
+     }
+ 
++    /// #349: remove OTHER members from the group (by signer id), producing an MLS
++    /// Commit that advances the epoch and ejects them. Default: unsupported —
++    /// only conversation kinds that model plain-MLS removal override this.
++    fn remove_member(
++        &mut self,
++        _cx: &mut ServiceContext<S>,
++        _targets: &[Vec<u8>],
++    ) -> Result<(), ChatError> {
++        Err(ChatError::UnsupportedFunction(
++            self.id().to_string(),
++            "Remove Member".into(),
++        ))
++    }
++
++    /// #349 TEST HOOK: [`Self::remove_member`] with the SENDER-side creator check
++    /// skipped — the forged removal an instrumented client can send, because that
++    /// check runs on the attacker's own device. Used only to prove the receive-side
++    /// authorization gate; never reachable from the app's FFI surface.
++    #[doc(hidden)]
++    fn remove_member_unchecked_for_test(
++        &mut self,
++        _cx: &mut ServiceContext<S>,
++        _targets: &[Vec<u8>],
++    ) -> Result<(), ChatError> {
++        Err(ChatError::UnsupportedFunction(
++            self.id().to_string(),
++            "Remove Member".into(),
++        ))
++    }
++
+     // All GroupConvos MUST return ConvoMetadata
+     // the return type is Option<_> to support legacy ConvoTypes which
+     // are being phased out.
+diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
+index e81c0fd..07d90b9 100644
+--- a/core/conversations/src/conversation/group_v1.rs
++++ b/core/conversations/src/conversation/group_v1.rs
+@@ -115,6 +115,43 @@ fn stall_step(stall: u32, flagged: bool, committed: bool, buffered: bool) -> Sta
+     StallStep { stall, flagged: flagged || epoch_desync, epoch_desync }
+ }
+ 
++/// #349 security: is a received Commit allowed to apply its Remove proposals?
++///
++/// MLS gives Remove no authorization semantics of its own, so the policy lives here
++/// and is decided from authenticated group state only:
++///
++/// * `creator` — the creator's leaf-credential content from the group-context metadata
++///   extension. `None` means the group predates #349 (or is a 1-1 delegate): nothing
++///   in group state says who may remove, so **nobody** may — fail closed. Such groups
++///   never had a removal capability, so this takes nothing away.
++/// * `committer` — the leaf credential of whoever signed this Commit (MLS-authenticated).
++/// * `removals` — `(removed, proposer)` credential pairs, one per Remove proposal.
++///
++/// A commit with no Remove proposals is unaffected (adds, updates, self-updates).
++/// A member proposing its OWN removal is a leave, not an eviction, and stays allowed
++/// whoever commits it — otherwise adding GroupV1 leave (#108) would deadlock.
++fn removes_authorized(
++    creator: Option<&[u8]>,
++    committer: &[u8],
++    removals: &[(Option<Vec<u8>>, Option<Vec<u8>>)],
++) -> bool {
++    if removals.is_empty() {
++        return true;
++    }
++    let Some(creator) = creator else {
++        return false;
++    };
++    if committer == creator {
++        return true;
++    }
++    removals
++        .iter()
++        .all(|(removed, proposer)| match (removed, proposer) {
++            (Some(removed), Some(proposer)) => removed == proposer,
++            _ => false,
++        })
++}
++
+ impl std::fmt::Debug for GroupV1Convo {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         f.debug_struct("GroupV1Convo")
+@@ -339,9 +376,24 @@ impl GroupV1Convo {
+             UnknownExtension(secret.to_vec()),
+         )];
+         if let Some((name, desc)) = meta {
++            // #349 security: record the creator's leaf-credential content in the
++            // (authenticated, epoch-stable) group context. This is the SAME value
++            // `MlsGroup::new` puts in the creator's own leaf below, so it compares
++            // byte-for-byte against `processed.credential()` on a Commit the creator
++            // sends — which is how `process_frame` decides whether a Remove is
++            // authorized. Without it, MLS grants every member the power to evict
++            // every other member.
++            let creator = cx
++                .mls_identity
++                .get_credential()
++                .credential
++                .serialized_content()
++                .to_vec();
+             exts.push(Extension::Unknown(
+                 GROUP_METADATA_EXTENSION_TYPE,
+-                UnknownExtension(ConvoMetaInfo::new(name, desc).to_extension_bytes()),
++                UnknownExtension(
++                    ConvoMetaInfo::new_with_creator(name, desc, creator).to_extension_bytes(),
++                ),
+             ));
+         }
+         let extensions =
+@@ -406,6 +458,58 @@ impl GroupV1Convo {
+             .map(Into::into)
+     }
+ 
++    /// #349 security: the group creator's leaf-credential content, as recorded in
++    /// the group-context metadata extension at creation. `None` for a 1-1 delegate
++    /// (no metadata extension) and for any group created before #349 — both of which
++    /// the removal gate treats as "no member is authorized to remove".
++    ///
++    /// Authenticated: GroupContext extensions are covered by the confirmation tag and
++    /// are identical for every member, so this cannot be forged by a peer. It can only
++    /// change through a GroupContextExtensions commit, which this client never sends.
++    fn creator_credential(&self) -> Option<Vec<u8>> {
++        self.mls_group
++            .extensions()
++            .iter()
++            .find_map(|ext| {
++                if let Extension::Unknown(ext_type, UnknownExtension(bytes)) = ext
++                    && *ext_type == GROUP_METADATA_EXTENSION_TYPE
++                {
++                    return ConvoMetaInfo::from_extension_bytes(bytes).ok();
++                }
++                None
++            })
++            .map(|meta| meta.creator().to_vec())
++            .filter(|creator| !creator.is_empty())
++    }
++
++    /// The leaf-credential content at `index` in the CURRENT (pre-merge) roster.
++    /// `None` if the leaf is blank/absent.
++    fn credential_at(&self, index: LeafNodeIndex) -> Option<Vec<u8>> {
++        self.mls_group
++            .members()
++            .find(|m| m.index == index)
++            .map(|m| m.credential.serialized_content().to_vec())
++    }
++
++    /// #349: one `(removed, proposer)` credential pair per Remove proposal carried by
++    /// a staged commit, resolved against the pre-merge roster (the removed leaf still
++    /// exists there). A proposal whose sender is not a group member (external /
++    /// new-member senders cannot propose Remove) yields `None` for the proposer, which
++    /// the gate treats as unauthorized.
++    fn staged_removals(&self, commit: &StagedCommit) -> Vec<(Option<Vec<u8>>, Option<Vec<u8>>)> {
++        commit
++            .remove_proposals()
++            .map(|p| {
++                let removed = self.credential_at(p.remove_proposal().removed());
++                let proposer = match p.sender() {
++                    Sender::Member(index) => self.credential_at(*index),
++                    _ => None,
++                };
++                (removed, proposer)
++            })
++            .collect()
++    }
++
+     /// Fetch a signer's KeyPackage from the registry. Members are signer
+     /// (installation) ids; resolving an account to its signers is the caller's
+     /// concern, above the core.
+@@ -560,6 +664,28 @@ impl GroupV1Convo {
+                 }))
+             }
+             ProcessedMessageContent::StagedCommitMessage(commit) => {
++                // #349 security: MLS carries NO authorization for Remove — any member
++                // can craft a RemoveProposal for any other, and plain `merge_staged_commit`
++                // applies it. The "creator-only" policy therefore has to be enforced HERE,
++                // on RECEIPT, against authenticated group state; a check on the sender's
++                // own device is only a UI affordance and an instrumented client skips it.
++                // The group state we trust is the creator's leaf credential recorded in the
++                // group-context metadata extension at creation (see `mls_create_config`).
++                if !removes_authorized(
++                    self.creator_credential().as_deref(),
++                    &cred_bytes,
++                    &self.staged_removals(&commit),
++                ) {
++                    // Drop, don't error: an unauthorized commit is as uninteresting as a
++                    // stale one, and erroring would abort the whole inbound batch. Every
++                    // honest member drops it identically, so they stay in sync with each
++                    // other at this epoch — it is the forger that strands itself.
++                    debug!(
++                        convo_id = %self.convo_id,
++                        "#349: dropped a Commit carrying Remove proposals from a non-creator"
++                    );
++                    return Ok(None);
++                }
+                 self.mls_group
+                     .merge_staged_commit(&cx.mls_provider, *commit)
+                     .map_err(ChatError::generic)?;
+@@ -761,6 +887,34 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+             .collect())
+     }
+ 
++    // #349: remove one or more members by signer id. Symmetric to add_member,
++    // but produces an MLS RemoveProposal+Commit (no Welcome) that advances the
++    // epoch and ejects the targets; every remaining member applies the commit
++    // and the removed leaf can no longer decrypt. A member's leaf credential
++    // content IS its signer id bytes (BasicCredential::new(id.as_str().as_bytes),
++    // see inbox_v2::identity), so we resolve leaves by matching that content.
++    fn remove_member(
++        &mut self,
++        cx: &mut ServiceContext<S>,
++        targets: &[Vec<u8>],
++    ) -> Result<(), ChatError> {
++        self.remove_member_impl(cx, targets, true)
++    }
++
++    // #349 TEST HOOK: the same removal WITHOUT the sender-side creator check —
++    // i.e. exactly what an instrumented/patched client can send, since that check
++    // runs on the attacker's own device. Exists so the receive-side gate (the real
++    // boundary) can be proven against a genuinely forged commit. Never called in
++    // production; the trait default is `UnsupportedFunction`.
++    #[doc(hidden)]
++    fn remove_member_unchecked_for_test(
++        &mut self,
++        cx: &mut ServiceContext<S>,
++        targets: &[Vec<u8>],
++    ) -> Result<(), ChatError> {
++        self.remove_member_impl(cx, targets, false)
++    }
++
+     fn metadata(&self) -> Option<ConvoMetadata> {
+         self.read_metadata()
+     }
+@@ -774,6 +928,88 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+     }
+ }
+ 
++impl GroupV1Convo {
++    // #349: remove one or more members. Symmetric to add_member, but produces an
++    // MLS RemoveProposal+Commit (no Welcome) that advances the epoch and ejects the
++    // targets; every remaining member applies the commit and the removed leaf can
++    // no longer decrypt.
++    //
++    // `enforce_creator` is the sender-side half of the creator-only policy. It is
++    // NOT the security boundary — `process_frame`'s receive-side check is, because
++    // an instrumented client simply deletes this one. It is here so an honest client
++    // fails loudly instead of publishing a Commit every other member will drop,
++    // which would advance only its own epoch and strand it out of the group.
++    fn remove_member_impl<S: ExternalServices>(
++        &mut self,
++        cx: &mut ServiceContext<S>,
++        targets: &[Vec<u8>],
++        enforce_creator: bool,
++    ) -> Result<(), ChatError> {
++        if targets.is_empty() {
++            return Ok(());
++        }
++
++        if enforce_creator {
++            let own = self
++                .mls_group
++                .own_leaf_node()
++                .map(|leaf| leaf.credential().serialized_content().to_vec());
++            match (self.creator_credential(), own) {
++                (Some(creator), Some(own)) if creator == own => {}
++                // Distinguish the two refusals: a group created before #349 carries no
++                // creator in its context, so NO member can be authorized on receipt and
++                // removal is unavailable for that group — a different fact from "you are
++                // not the creator", and the app surfaces it differently.
++                (None, _) => {
++                    return Err(ChatError::Protocol(
++                        "remove_member: this group has no recorded creator (created before \
++                         member removal was supported), so removal is unavailable"
++                            .into(),
++                    ));
++                }
++                _ => {
++                    return Err(ChatError::Protocol(
++                        "remove_member: only the group creator may remove members".into(),
++                    ));
++                }
++            }
++        }
++
++        // Targets are LEAF CREDENTIAL contents (serialized DelegateCredential bytes) — the
++        // exact `serialized_content()` an MLS leaf carries. The caller (client facade)
++        // resolves the account → its leaf credential(s) via the directory, because the
++        // account address and the signer id are NOT the leaf credential (that mismatch was
++        // the bug the on-device test caught). Match by raw bytes.
++        let leaves: Vec<LeafNodeIndex> = self
++            .mls_group
++            .members()
++            .filter(|m| {
++                targets
++                    .iter()
++                    .any(|t| t.as_slice() == m.credential.serialized_content())
++            })
++            .map(|m| m.index)
++            .collect();
++        if leaves.is_empty() {
++            return Err(ChatError::Protocol(
++                "remove_member: no matching group member for the given credential(s)".into(),
++            ));
++        }
++
++        // NB: never `.unwrap()` an MLS op on a worker thread — surface the error.
++        let (commit, _welcome, _group_info) = self
++            .mls_group
++            .remove_members(&cx.mls_provider, &cx.mls_identity, &leaves)
++            .map_err(ChatError::generic)?;
++
++        self.mls_group
++            .merge_pending_commit(&cx.mls_provider)
++            .map_err(ChatError::generic)?;
++
++        self.send_payload(cx, commit.to_bytes()?)
++    }
++}
++
+ // #graph-hiding Phase 1b — crypto unit tests for the outer seal that hides the MLS
+ // framing (group_id/epoch) from the delivery node. These reach the PRIVATE
+ // `seal`/`unseal` directly (same-module child), so they test the AEAD contract in
+@@ -940,3 +1176,126 @@ mod stall_tests {
+         assert_eq!((fired, stall), (0, 0), "in-sync traffic never stalls");
+     }
+ }
++
++// #349 security — the removal-authorization gate that runs on RECEIPT.
++//
++// This is the property the whole feature rests on: MLS has no authorization for
++// Remove, so if these tests go green-to-red, any group member can evict any other
++// member and every honest client will apply it. The gate is a pure function of
++// authenticated group state (the creator recorded in the group context, the
++// MLS-authenticated committer credential, and the staged Remove proposals), so it
++// is testable without a live MLS group.
++#[cfg(test)]
++mod remove_auth_tests {
++    use super::removes_authorized;
++
++    const CREATOR: &[u8] = b"creator-leaf-credential";
++    const MALLORY: &[u8] = b"mallory-leaf-credential";
++    const VICTIM: &[u8] = b"victim-leaf-credential";
++
++    fn pair(removed: &[u8], proposer: &[u8]) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
++        (Some(removed.to_vec()), Some(proposer.to_vec()))
++    }
++
++    // The attack from the review: a non-creator member commits a Remove for someone
++    // else. Must NOT be applied.
++    #[test]
++    fn non_creator_cannot_evict_another_member() {
++        assert!(
++            !removes_authorized(Some(CREATOR), MALLORY, &[pair(VICTIM, MALLORY)]),
++            "a non-creator's eviction of another member must be rejected on receipt"
++        );
++    }
++
++    // ...including when it is the CREATOR being evicted (group takeover).
++    #[test]
++    fn non_creator_cannot_evict_the_creator() {
++        assert!(
++            !removes_authorized(Some(CREATOR), MALLORY, &[pair(CREATOR, MALLORY)]),
++            "a member must not be able to evict the group creator"
++        );
++    }
++
++    // The legitimate path stays open.
++    #[test]
++    fn creator_may_evict() {
++        assert!(
++            removes_authorized(Some(CREATOR), CREATOR, &[pair(VICTIM, CREATOR)]),
++            "the recorded creator must still be able to remove a member"
++        );
++    }
++
++    // Fail closed on a group whose context records no creator (pre-#349 groups and
++    // the 1-1 delegate): nothing in authenticated state says who may remove, so nobody may.
++    #[test]
++    fn absent_creator_authorizes_nobody() {
++        assert!(
++            !removes_authorized(None, CREATOR, &[pair(VICTIM, CREATOR)]),
++            "with no creator in group state the gate must fail closed"
++        );
++        assert!(!removes_authorized(None, MALLORY, &[pair(VICTIM, MALLORY)]));
++    }
++
++    // Commits with no Remove proposals (adds, updates, key rotations) are untouched —
++    // the gate must not break ordinary group traffic, incl. on pre-#349 groups.
++    #[test]
++    fn commits_without_removes_are_unaffected() {
++        assert!(removes_authorized(Some(CREATOR), MALLORY, &[]));
++        assert!(removes_authorized(None, MALLORY, &[]));
++    }
++
++    // A member proposing its own removal is a leave (#108), allowed whoever commits it.
++    #[test]
++    fn self_removal_is_a_leave_and_stays_allowed() {
++        assert!(
++            removes_authorized(Some(CREATOR), MALLORY, &[pair(VICTIM, VICTIM)]),
++            "a member's own leave proposal must still be committable by anyone"
++        );
++    }
++
++    // ...but a non-creator must not smuggle an eviction alongside a genuine leave.
++    #[test]
++    fn a_leave_does_not_launder_an_eviction_in_the_same_commit() {
++        assert!(
++            !removes_authorized(
++                Some(CREATOR),
++                MALLORY,
++                &[pair(VICTIM, VICTIM), pair(CREATOR, MALLORY)]
++            ),
++            "every Remove in the commit must be authorized, not just the first"
++        );
++    }
++
++    // An unresolvable removed/proposer leaf (blank leaf, external sender — neither can
++    // legitimately drive a Remove) is never treated as a self-leave.
++    #[test]
++    fn unresolvable_leaves_are_not_self_removals() {
++        assert!(!removes_authorized(
++            Some(CREATOR),
++            MALLORY,
++            &[(Some(VICTIM.to_vec()), None)]
++        ));
++        assert!(!removes_authorized(
++            Some(CREATOR),
++            MALLORY,
++            &[(None, Some(MALLORY.to_vec()))]
++        ));
++        assert!(!removes_authorized(Some(CREATOR), MALLORY, &[(None, None)]));
++    }
++
++    // The comparison is exact bytes — a prefix of the creator credential is not the
++    // creator (guards against a truncating/`starts_with` regression).
++    #[test]
++    fn committer_match_is_exact() {
++        assert!(!removes_authorized(
++            Some(CREATOR),
++            &CREATOR[..CREATOR.len() - 1],
++            &[pair(VICTIM, CREATOR)]
++        ));
++        assert!(!removes_authorized(
++            Some(CREATOR),
++            b"creator-leaf-credential-x",
++            &[pair(VICTIM, CREATOR)]
++        ));
++    }
++}
+diff --git a/core/conversations/src/conversation/mls_extensions.rs b/core/conversations/src/conversation/mls_extensions.rs
+index 53c41b1..7550240 100644
+--- a/core/conversations/src/conversation/mls_extensions.rs
++++ b/core/conversations/src/conversation/mls_extensions.rs
+@@ -67,6 +67,13 @@ pub struct ConvoMetaInfo {
+     version: ConvoMetaInfoVersion,
+     name: String,
+     desc: String,
++    /// #349 security: the group creator's MLS **leaf-credential content**, written
++    /// once at creation. Being a GroupContext extension it is authenticated (covered
++    /// by the confirmation tag / transcript) and identical for every member, so a
++    /// receiver can decide "was this Commit sent by the creator?" from group state
++    /// rather than from a caller-local flag. Empty = not recorded (a group created
++    /// before #349, or a GroupV2 metadata blob).
++    creator: Vec<u8>,
+ }
+ 
+ impl ConvoMetaInfo {
+@@ -75,9 +82,29 @@ impl ConvoMetaInfo {
+             version: ConvoMetaInfoVersion::V1,
+             name: name.into(),
+             desc: desc.into(),
++            creator: Vec::new(),
+         }
+     }
+ 
++    /// #349: as [`Self::new`], but recording the creator's leaf-credential content.
++    pub fn new_with_creator(
++        name: impl Into<String>,
++        desc: impl Into<String>,
++        creator: impl Into<Vec<u8>>,
++    ) -> Self {
++        Self {
++            version: ConvoMetaInfoVersion::V1,
++            name: name.into(),
++            desc: desc.into(),
++            creator: creator.into(),
++        }
++    }
++
++    /// #349: the recorded creator's leaf-credential content; empty if none.
++    pub fn creator(&self) -> &[u8] {
++        &self.creator
++    }
++
+     pub fn to_extension_bytes(&self) -> Vec<u8> {
+         // TLS presentation-language encoding — matches the MLS stack's wire
+         // format. Writing to a Vec is infallible; the only error path is a
+@@ -93,11 +120,27 @@ impl ConvoMetaInfo {
+ 
+ // Each field is encoded as a variable-length opaque (`opaque <V>`); `IdentId`
+ // and `String` aren't `tls_codec` types, so we encode/decode their UTF-8 bytes.
++//
++// #349: `creator` is a TRAILING OPTIONAL field, written only when non-empty, and
++// the version stays V1 on purpose. TLS presentation-language decoding is
++// positional and `from_extension_bytes` does not require full consumption, so:
++//   - a pre-#349 client reads version/name/desc out of a new blob and stops,
++//     leaving the creator bytes unread (no flag day for group creation);
++//   - a #349 client reading a pre-#349 blob hits EOF where the creator would be
++//     and records "no creator" — which the receive-side gate treats as
++//     "nobody may remove", i.e. fail-closed.
++// Bumping the version instead would make old clients reject the whole extension,
++// which is what classifies a welcome as a group vs a 1-1 (`read_metadata`).
+ impl Size for ConvoMetaInfo {
+     fn tls_serialized_len(&self) -> usize {
+         (self.version as u16).tls_serialized_len()
+             + VLByteSlice(self.name.as_bytes()).tls_serialized_len()
+             + VLByteSlice(self.desc.as_bytes()).tls_serialized_len()
++            + if self.creator.is_empty() {
++                0
++            } else {
++                VLByteSlice(&self.creator).tls_serialized_len()
++            }
+     }
+ }
+ 
+@@ -106,6 +149,9 @@ impl Serialize for ConvoMetaInfo {
+         let mut written = (self.version as u16).tls_serialize(writer)?;
+         written += VLByteSlice(self.name.as_bytes()).tls_serialize(writer)?;
+         written += VLByteSlice(self.desc.as_bytes()).tls_serialize(writer)?;
++        if !self.creator.is_empty() {
++            written += VLByteSlice(&self.creator).tls_serialize(writer)?;
++        }
+         Ok(written)
+     }
+ }
+@@ -115,10 +161,15 @@ impl Deserialize for ConvoMetaInfo {
+         let version = ConvoMetaInfoVersion::try_from(u16::tls_deserialize(bytes)?)?;
+         let name = vl_string(bytes)?;
+         let desc = vl_string(bytes)?;
++        // Absent (pre-#349 blob) → empty, never an error: see the note above.
++        let creator = VLBytes::tls_deserialize(bytes)
++            .map(Vec::<u8>::from)
++            .unwrap_or_default();
+         Ok(Self {
+             version,
+             name,
+             desc,
++            creator,
+         })
+     }
+ }
+@@ -137,3 +188,63 @@ impl From<ConvoMetaInfo> for ConvoMetadata {
+         }
+     }
+ }
++
++// #349 — wire compatibility of the trailing `creator` field. The receive-side removal
++// gate reads the creator out of this blob, so a decoding regression here silently
++// turns the gate into "no creator recorded" for every group. These pin both
++// directions of the pre-#349 ↔ #349 boundary.
++#[cfg(test)]
++mod creator_codec_tests {
++    use super::ConvoMetaInfo;
++
++    const CREATOR: &[u8] = b"creator-leaf-credential";
++
++    #[test]
++    fn creator_survives_a_round_trip() {
++        let bytes = ConvoMetaInfo::new_with_creator("group", "desc", CREATOR).to_extension_bytes();
++        let back = ConvoMetaInfo::from_extension_bytes(&bytes).expect("decodes");
++        assert_eq!(back.name, "group");
++        assert_eq!(back.desc, "desc");
++        assert_eq!(back.creator(), CREATOR);
++    }
++
++    // A pre-#349 blob (no creator) must still decode — and report no creator, which
++    // is what makes the removal gate fail closed on legacy groups instead of panicking
++    // or, worse, defaulting to "authorized".
++    #[test]
++    fn legacy_blob_without_creator_decodes_as_no_creator() {
++        let legacy = ConvoMetaInfo::new("group", "desc").to_extension_bytes();
++        let back = ConvoMetaInfo::from_extension_bytes(&legacy).expect("decodes");
++        assert_eq!(back.name, "group");
++        assert_eq!(back.desc, "desc");
++        assert!(back.creator().is_empty(), "no creator recorded");
++    }
++
++    // Omitting the field entirely when empty keeps the encoding byte-identical to
++    // pre-#349, so GroupV2 metadata and 1-1 blobs are untouched.
++    #[test]
++    fn empty_creator_is_not_written() {
++        let with_empty =
++            ConvoMetaInfo::new_with_creator("group", "desc", Vec::new()).to_extension_bytes();
++        assert_eq!(
++            with_empty,
++            ConvoMetaInfo::new("group", "desc").to_extension_bytes()
++        );
++    }
++
++    // A pre-#349 decoder reads version/name/desc positionally and stops; the creator
++    // bytes are trailing, so a new blob must still yield the right name/desc when only
++    // that prefix is consumed. Simulated by decoding the new blob truncated to the
++    // legacy length.
++    #[test]
++    fn old_decoder_prefix_still_yields_name_and_desc() {
++        let legacy_len = ConvoMetaInfo::new("group", "desc")
++            .to_extension_bytes()
++            .len();
++        let new = ConvoMetaInfo::new_with_creator("group", "desc", CREATOR).to_extension_bytes();
++        assert!(new.len() > legacy_len, "creator is appended, not inlined");
++        assert_eq!(&new[..legacy_len], &ConvoMetaInfo::new("group", "desc").to_extension_bytes()[..]);
++        let prefix = ConvoMetaInfo::from_extension_bytes(&new[..legacy_len]).expect("decodes");
++        assert_eq!((prefix.name.as_str(), prefix.desc.as_str()), ("group", "desc"));
++    }
++}
+diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
+index 2fd94ab..445fc31 100644
+--- a/core/conversations/src/core.rs
++++ b/core/conversations/src/core.rs
+@@ -459,6 +459,71 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+         }
+     }
+ 
++    /// #349: remove other members from a group. Authorization is NOT decided here —
++    /// it is enforced by every receiver in `GroupV1Convo::process_frame` against the
++    /// creator recorded in authenticated group state; the local checks (here and in
++    /// the app) only stop an honest client from publishing a commit that would be
++    /// dropped. Like group_add_member, checkpoints even on failure — a partially
++    /// applied remove still mutated MLS state and must not be lost.
++    pub fn group_remove_member(
++        &mut self,
++        convo_id: &str,
++        targets: &[Vec<u8>],
++    ) -> Result<(), ChatError> {
++        let result = self.group_remove_member_inner(convo_id, targets, true);
++        self.persist_mls_state()?;
++        result
++    }
++
++    /// #349 TEST HOOK: publish a removal with the SENDER-side creator check skipped,
++    /// modelling an instrumented client. Never wired to the FFI surface; exists so a
++    /// test can prove the receive-side gate rejects a genuinely forged Remove commit.
++    #[doc(hidden)]
++    pub fn group_remove_member_unchecked_for_test(
++        &mut self,
++        convo_id: &str,
++        targets: &[Vec<u8>],
++    ) -> Result<(), ChatError> {
++        let result = self.group_remove_member_inner(convo_id, targets, false);
++        self.persist_mls_state()?;
++        result
++    }
++
++    fn group_remove_member_inner(
++        &mut self,
++        convo_id: &str,
++        targets: &[Vec<u8>],
++        enforce_creator: bool,
++    ) -> Result<(), ChatError> {
++        if self.cached_convos.contains_key(convo_id) {
++            let convo = self
++                .cached_convos
++                .get_mut(convo_id)
++                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
++
++            match convo {
++                ConvoTypeOwned::Group(group_convo) => {
++                    if enforce_creator {
++                        group_convo.remove_member(&mut self.services, targets)
++                    } else {
++                        group_convo.remove_member_unchecked_for_test(&mut self.services, targets)
++                    }
++                }
++                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
++                    convo.id().into(),
++                    "Remove Member".into(),
++                )),
++            }
++        } else {
++            let mut convo = self.load_group_convo(convo_id)?;
++            if enforce_creator {
++                convo.remove_member(&mut self.services, targets)
++            } else {
++                convo.remove_member_unchecked_for_test(&mut self.services, targets)
++            }
++        }
++    }
++
+     /// Each member's MLS leaf-credential content (hex-encoded); errors if
+     /// `convo_id` names a direct (non-group) conversation.
+     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+diff --git a/core/integration_tests_core/tests/remove_member_authorization.rs b/core/integration_tests_core/tests/remove_member_authorization.rs
+new file mode 100644
+index 0000000..aaa0d21
+--- /dev/null
++++ b/core/integration_tests_core/tests/remove_member_authorization.rs
+@@ -0,0 +1,190 @@
++//! #349 SECURITY — the creator-only removal policy must hold against an
++//! INSTRUMENTED client, not just a well-behaved UI.
++//!
++//! MLS gives Remove no authorization semantics: any member can craft a
++//! RemoveProposal for any other member and a plain receiver merges the commit.
++//! The app's "creator-only" checks (JS, Kotlin, and the sender-side native check)
++//! all run on the *caller's own device*, so an attacker who patches their binary
++//! skips every one of them. The only check that can actually hold is the one each
++//! RECEIVER runs against authenticated group state — that is what these tests pin.
++//!
++//! `group_remove_member_unchecked_for_test` is exactly that patched binary: the
++//! real MLS removal with the sender-side check removed. If the receive-side gate
++//! regresses, these go red and the eviction lands on honest members.
++//!
++//! Setup mirrors remove_member_spike.rs: a real 3-member GroupV1 over the harness.
++
++use integration_tests_core::TestHarness;
++use shared_traits::IdentId;
++
++/// Build a settled 3-member group created by Saro (so Saro is the creator, and
++/// Raya/Pax are ordinary members). Returns the conversation id.
++fn settled_group(harness: &mut TestHarness<3>) -> String {
++    let raya_addr = harness.raya().addr();
++    let pax_addr = harness.pax().addr();
++    let convo = harness
++        .saro()
++        .create_group_convo_v1(&[&raya_addr, &pax_addr], "grp", "desc")
++        .expect("saro create group");
++    harness.process_until_label("raya+pax join", |h| {
++        h.raya().convo_count() == 1 && h.pax().convo_count() == 1
++    });
++    harness
++        .saro()
++        .send_content(&convo, b"warm")
++        .expect("send warm");
++    harness
++        .process_until(|h| h.raya().check(&convo, b"warm") && h.pax().check(&convo, b"warm"));
++    convo
++}
++
++/// THE REVIEW'S P1. Raya is a member but not the creator. Raya's instrumented
++/// client publishes a real MLS Remove commit evicting Pax. Every honest member
++/// must refuse to apply it: Pax stays on the roster and stays in sync.
++#[test]
++fn a_non_creators_forged_remove_commit_is_rejected_by_receivers() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let convo = settled_group(&mut harness);
++
++    let saro_epoch_before = harness.saro().group_epoch_for_test(&convo).expect("cached");
++    let pax_epoch_before = harness.pax().group_epoch_for_test(&convo).expect("cached");
++
++    // Raya (NOT the creator) forges the removal of Pax — a genuine, correctly
++    // signed MLS Remove commit; only the local policy check was skipped.
++    let pax_leaf = IdentId::new("pax".to_string());
++    harness
++        .raya()
++        .group_remove_member_unchecked_for_test(&convo, &[pax_leaf.as_str().as_bytes().to_vec()])
++        .expect("the forged commit is published — MLS itself does not stop it");
++    harness.process(std::time::Duration::from_secs(2));
++
++    // The creator must NOT have applied it: roster and epoch unchanged.
++    assert_eq!(
++        harness.saro().group_members(&convo).expect("roster").len(),
++        3,
++        "the creator's roster must still hold all 3 members — a non-creator evicted nobody"
++    );
++    assert_eq!(
++        harness.saro().group_epoch_for_test(&convo).expect("cached"),
++        saro_epoch_before,
++        "an unauthorized Remove commit must not advance the creator's epoch"
++    );
++
++    // The victim must NOT have been locked out.
++    assert_eq!(
++        harness.pax().group_epoch_for_test(&convo).expect("cached"),
++        pax_epoch_before,
++        "the targeted member must not be stranded by an unauthorized removal"
++    );
++
++    // ...and the group still works end-to-end for the victim afterwards: the
++    // creator sends, the victim decrypts. (Availability, the review's stated impact.)
++    harness
++        .saro()
++        .send_content(&convo, b"still-here")
++        .expect("creator sends after the forged removal");
++    harness.process_until_label("victim still receives", |h| {
++        h.pax().check(&convo, b"still-here")
++    });
++}
++
++/// The other half: the legitimate path must still work after the gate. The
++/// creator's removal is applied by the remaining honest member and the removed
++/// member is stranded (the #349 behaviour the PR ships).
++#[test]
++fn the_creators_removal_is_still_applied_by_other_members() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let convo = settled_group(&mut harness);
++
++    let raya_epoch_before = harness.raya().group_epoch_for_test(&convo).expect("cached");
++
++    let pax_leaf = IdentId::new("pax".to_string());
++    harness
++        .saro()
++        .group_remove_member(&convo, &[pax_leaf.as_str().as_bytes().to_vec()])
++        .expect("the creator may remove");
++    harness.process(std::time::Duration::from_secs(2));
++
++    // Raya (an honest non-creator receiver) APPLIED the creator's commit: the gate
++    // rejects forgeries without breaking legitimate removals.
++    assert!(
++        harness.raya().group_epoch_for_test(&convo).expect("cached") > raya_epoch_before,
++        "a remaining member must apply the creator's Remove commit (epoch advances)"
++    );
++    assert_eq!(
++        harness.raya().group_members(&convo).expect("roster").len(),
++        2,
++        "the removed member is gone from a remaining member's roster"
++    );
++}
++
++/// A non-creator must not be able to evict the CREATOR either — otherwise the
++/// gate could be bypassed by first decapitating the group.
++#[test]
++fn a_non_creator_cannot_evict_the_creator() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let convo = settled_group(&mut harness);
++
++    let saro_epoch_before = harness.saro().group_epoch_for_test(&convo).expect("cached");
++    let saro_leaf = IdentId::new("saro".to_string());
++    harness
++        .raya()
++        .group_remove_member_unchecked_for_test(&convo, &[saro_leaf.as_str().as_bytes().to_vec()])
++        .expect("published");
++    harness.process(std::time::Duration::from_secs(2));
++
++    assert_eq!(
++        harness.saro().group_epoch_for_test(&convo).expect("cached"),
++        saro_epoch_before,
++        "the creator must not apply a commit that evicts the creator"
++    );
++    assert_eq!(
++        harness.saro().group_members(&convo).expect("roster").len(),
++        3,
++        "no takeover: the roster is untouched"
++    );
++    assert_eq!(
++        harness.pax().group_members(&convo).expect("roster").len(),
++        3,
++        "the third member agrees — everyone honest stayed on the same group state"
++    );
++}
++
++/// The sender-side half: an honest (unpatched) non-creator is refused locally, so
++/// it never publishes a commit the group would drop and strand it behind.
++#[test]
++fn an_honest_non_creator_is_refused_locally() {
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let convo = settled_group(&mut harness);
++
++    let epoch_before = harness.raya().group_epoch_for_test(&convo).expect("cached");
++    let pax_leaf = IdentId::new("pax".to_string());
++    let err = harness
++        .raya()
++        .group_remove_member(&convo, &[pax_leaf.as_str().as_bytes().to_vec()])
++        .expect_err("a non-creator's removal must fail on its own device too");
++    assert!(
++        err.to_string().contains("only the group creator"),
++        "the refusal must name the reason, got: {err}"
++    );
++    assert_eq!(
++        harness.raya().group_epoch_for_test(&convo).expect("cached"),
++        epoch_before,
++        "a refused removal must not have mutated local MLS state"
++    );
++}
+diff --git a/core/integration_tests_core/tests/remove_member_spike.rs b/core/integration_tests_core/tests/remove_member_spike.rs
+new file mode 100644
+index 0000000..b92733a
+--- /dev/null
++++ b/core/integration_tests_core/tests/remove_member_spike.rs
+@@ -0,0 +1,99 @@
++//! #349 EXPERIMENT — prove GroupV1 can remove OTHER members.
++//!
++//! The open question before committing to the full remove-then-add recovery
++//! (#349/#350) is purely mechanical: does a from-scratch MLS `remove_members`
++//! in GroupV1 (a) produce a real epoch-advancing Commit the remaining members
++//! apply, and (b) actually LOCK OUT the removed member (they can no longer
++//! decrypt subsequent traffic)? GroupV1 had no remove path at all, so this is
++//! the trivial experiment that de-risks the feature.
++//!
++//! Setup mirrors test_graph_hiding_epoch_stability.rs: a real 3-member GroupV1.
++
++use integration_tests_core::TestHarness;
++use shared_traits::IdentId;
++
++#[test]
++fn removing_a_member_advances_the_epoch_and_locks_them_out() {
++    let _ = tracing_subscriber::fmt()
++        .with_max_level(tracing::Level::INFO)
++        .with_test_writer()
++        .try_init();
++
++    let mut harness = TestHarness::<3>::new(|_, _| {});
++    let raya_addr = harness.raya().addr();
++    let pax_addr = harness.pax().addr();
++
++    // Saro creates a real named group with Raya + Pax; settle both joins.
++    let convo = harness
++        .saro()
++        .create_group_convo_v1(&[&raya_addr, &pax_addr], "grp", "desc")
++        .expect("saro create group");
++    harness.process_until_label("raya+pax join", |h| {
++        h.raya().convo_count() == 1 && h.pax().convo_count() == 1
++    });
++
++    // Warm-up so the group is fully settled on all three sides.
++    harness.saro().send_content(&convo, b"warm").expect("send warm");
++    harness.process_until(|h| {
++        h.raya().check(&convo, b"warm") && h.pax().check(&convo, b"warm")
++    });
++
++    // All three are members before the removal.
++    assert_eq!(
++        harness.saro().group_members(&convo).expect("roster").len(),
++        3,
++        "group starts with 3 members"
++    );
++    let epoch_before = harness
++        .saro()
++        .group_epoch_for_test(&convo)
++        .expect("group cached on saro");
++
++    // The MLS leaf credential is the member's short id ("pax"), NOT the account
++    // address hash — so we target that. (Mapping account -> leaf credential is
++    // the client facade's job in production; the experiment targets the leaf
++    // directly to isolate the MLS mechanic.) `group_remove_member` takes raw leaf
++    // credential contents since the DelegateCredential fix.
++    let pax_leaf = IdentId::new("pax".to_string());
++
++    // ---- REMOVE Pax (a real MLS Remove commit) ---------------------------
++    harness
++        .saro()
++        .group_remove_member(&convo, &[pax_leaf.as_str().as_bytes().to_vec()])
++        .expect("saro remove pax");
++
++    // (a) The removing member's OWN state: the commit merged locally, advancing
++    // the epoch and dropping pax from the roster. (We assert saro's view — saro
++    // never has to decrypt anything it can't, so this is crash-free regardless
++    // of how the harness treats a locked-out peer.)
++    let epoch_after = harness
++        .saro()
++        .group_epoch_for_test(&convo)
++        .expect("group cached on saro");
++    assert!(
++        epoch_after > epoch_before,
++        "removing a member must advance the MLS epoch (before={epoch_before}, after={epoch_after})"
++    );
++    assert_eq!(
++        harness.saro().group_members(&convo).expect("roster").len(),
++        2,
++        "saro's roster drops to 2 after removing pax"
++    );
++
++    // (b) THE LOCKOUT, proven WITHOUT forcing pax to decrypt (which would make
++    // the harness's `handle_payload(..).unwrap()` panic — itself evidence of the
++    // lockout): pax never received the epoch-advancing commit's new secrets, so
++    // pax is stranded on the old epoch while saro moved forward.
++    let pax_epoch = harness
++        .pax()
++        .group_epoch_for_test(&convo)
++        .expect("group cached on pax");
++    assert_eq!(
++        pax_epoch, epoch_before,
++        "the removed member stays stranded on the pre-removal epoch (locked out)"
++    );
++    assert!(
++        epoch_after > pax_epoch,
++        "saro advanced past pax's epoch — pax can no longer decrypt group traffic"
++    );
++}
+diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
+index 9af3296..a6eaa2f 100644
+--- a/crates/generic-chat/src/client.rs
++++ b/crates/generic-chat/src/client.rs
+@@ -281,6 +281,46 @@ where
+             .map_err(Into::into)
+     }
+ 
++    /// #349: remove other accounts' devices from a group (creator-gated at the
++    /// app layer). Resolves each account to its signer (installation) ids and
++    /// removes every matching MLS leaf in one epoch-advancing commit. Mirrors
++    /// [`Self::add_group_members`].
++    pub fn remove_group_member(
++        &mut self,
++        convo_id: &str,
++        accounts: &[AccountAddressRef],
++    ) -> Result<(), ClientError> {
++        // A GroupV1 leaf carries a serialized DelegateCredential — NOT the account
++        // address or the signer id (that mismatch was the bug the on-device test caught).
++        // Resolve each target account to its actual leaf credential(s) the same way
++        // `group_members` maps a leaf → account (via the directory), then remove by the
++        // credential bytes the leaf actually holds.
++        let matches = |id: &str| accounts.iter().any(|a| id.eq_ignore_ascii_case(a));
++        let credentials = self.core.lock().group_members(convo_id)?;
++        let wanted: Vec<Vec<u8>> = credentials
++            .into_iter()
++            .filter(|cred| {
++                roster_member(&self.directory, cred).is_some_and(|m| {
++                    m.account
++                        .as_ref()
++                        .is_some_and(|acc| matches(acc.as_str()))
++                        || matches(m.local_identity.as_str())
++                })
++            })
++            .collect();
++        if wanted.is_empty() {
++            return Err(libchat::ChatError::Protocol(
++                "remove_group_member: no group member matched the given account(s)".into(),
++            )
++            .into());
++        }
++
++        self.core
++            .lock()
++            .group_remove_member(convo_id, &wanted)
++            .map_err(Into::into)
++    }
++
+     /// Leave a group conversation: stage the removal of THIS client from the
+     /// group's roster. Like [`Self::add_group_members`] the removal runs as a
+     /// consensus round — it is merged by the group's next commit, not when this

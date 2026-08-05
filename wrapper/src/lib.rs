@@ -93,6 +93,8 @@ const EVENT_CONVERSATION_STARTED: c_int = 1;
 const EVENT_MESSAGE_RECEIVED: c_int = 2;
 const EVENT_MEMBERS_CHANGED: c_int = 3;
 const EVENT_INBOUND_ERROR: c_int = 4;
+// #348: the local member is stuck on an old MLS epoch and cannot recover in-band.
+const EVENT_CONVERSATION_DESYNCED: c_int = 5;
 
 struct SendPtr {
     cb: EventCallback,
@@ -339,6 +341,36 @@ pub unsafe extern "C" fn logoschat_add_group_member(
     }
 }
 
+/// #349: remove OTHER member `peer_address` from group `convo_id` (creator-gated
+/// at the app layer). Produces an MLS Remove commit that advances the epoch and
+/// ejects the target; every remaining member applies it and the removed leaf can
+/// no longer decrypt. Returns 0 on success, -1 else (`logoschat_last_error`).
+///
+/// # Safety
+/// `h` a valid handle; `convo_id`/`peer_address` valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_remove_group_member(
+    h: *mut c_void,
+    convo_id: *const c_char,
+    peer_address: *const c_char,
+) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    let (Some(convo), Some(peer)) = (cstr(convo_id), cstr(peer_address)) else {
+        set_last_error("convo_id/peer_address null or not UTF-8");
+        return -1;
+    };
+    match h.client.remove_group_member(convo, &[peer]) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("remove_group_member failed: {e}"));
+            -1
+        }
+    }
+}
+
 /// Leave group `convo_id` (remove SELF from its roster). Returns 0 on success,
 /// -1 else. The removal is a de-mls consensus round: it is merged by the group's
 /// next commit, not when this call returns. Fails while the group is mid-round,
@@ -364,6 +396,175 @@ pub unsafe extern "C" fn logoschat_leave_group(h: *mut c_void, convo_id: *const 
             -1
         }
     }
+}
+
+/// #237: pause (`active == 0`) or resume (`active != 0`) the embedded node's Waku
+/// delivery (filter/lightpush + subscriptions) WITHOUT tearing the node down. The
+/// MLS engine stays alive, so `logoschat_encrypt_for_convo` /
+/// `logoschat_ingest_ciphertext` keep working over BLE while Logos is "off".
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `h` must be a valid handle from `logoschat_open`/`logoschat_open_persistent`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_set_delivery_active(h: *mut c_void, active: c_int) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    match h.client.set_delivery_active(active != 0) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("set_delivery_active failed: {e}"));
+            -1
+        }
+    }
+}
+
+/// #292: force an immediate store catch-up on all active topics. Called on app
+/// foreground so messages/reactions that arrived while the node was frozen surface at
+/// once, instead of waiting for the next periodic (~20s) pull. No-op while paused.
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `h` must be a valid handle from `logoschat_open`/`logoschat_open_persistent`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_catchup_now(h: *mut c_void) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    match h.client.catchup_now() {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("catchup_now failed: {e}"));
+            -1
+        }
+    }
+}
+
+/// #239: our contact card as JSON — everything a peer needs to add us to an MLS
+/// conversation OFFLINE (over BLE), without the HTTP registry:
+/// `{account, device, keyPackage, bundlePayload, bundleSig}` (byte fields base64).
+/// Null on failure (e.g. register/publish haven't run). Caller frees.
+///
+/// # Safety
+/// `h` must be a valid handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_export_contact(h: *mut c_void) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    match h.client.directory().export_contact() {
+        Some((account, device, kp, bundle_payload, bundle_sig)) => {
+            use base64::Engine;
+            let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+            to_c_string(
+                serde_json::json!({
+                    "account": account,
+                    "device": device,
+                    "keyPackage": b64(&kp),
+                    "bundlePayload": b64(&bundle_payload),
+                    "bundleSig": b64(&bundle_sig),
+                })
+                .to_string(),
+            )
+        }
+        None => {
+            set_last_error("no contact to export (identity not registered this session)");
+            ptr::null_mut()
+        }
+    }
+}
+
+/// #239: verify + seed a peer's contact card (the JSON from `logoschat_export_contact`
+/// on their device, delivered over BLE) so a subsequent
+/// `logoschat_create_conversation_offline` can add them with no network. The
+/// bundle is verified under its account key. 0 ok, -1 error.
+///
+/// # Safety
+/// `h` a valid handle; `card_json` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_import_contact(h: *mut c_void, card_json: *const c_char) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    let Some(json) = cstr(card_json) else {
+        set_last_error("card_json is null or not UTF-8");
+        return -1;
+    };
+    let v: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            set_last_error(format!("bad contact card json: {e}"));
+            return -1;
+        }
+    };
+    use base64::Engine;
+    let dec = |k: &str| -> Result<Vec<u8>, String> {
+        let s = v[k].as_str().ok_or_else(|| format!("missing field {k}"))?;
+        base64::engine::general_purpose::STANDARD
+            .decode(s)
+            .map_err(|e| e.to_string())
+    };
+    let account = v["account"].as_str().unwrap_or("");
+    let device = v["device"].as_str().unwrap_or("");
+    let (kp, bp, sig) = match (dec("keyPackage"), dec("bundlePayload"), dec("bundleSig")) {
+        (Ok(a), Ok(b), Ok(c)) => (a, b, c),
+        _ => {
+            set_last_error("contact card has malformed base64 fields");
+            return -1;
+        }
+    };
+    match h.client.directory().import_contact(account, device, kp, bp, sig) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("import_contact failed: {e}"));
+            -1
+        }
+    }
+}
+
+/// #239: create a 1:1 with `peer_account` using ONLY locally-seeded contact data
+/// (see `logoschat_import_contact`) and return the welcome to carry over BLE —
+/// `{convoId, welcome:[<base64 wire bytes>]}`. Delivery must be paused (Logos off)
+/// so the welcome is buffered rather than published; it is drained here. Null on
+/// failure. Caller frees.
+///
+/// # Safety
+/// `h` a valid handle; `peer_account` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_create_conversation_offline(
+    h: *mut c_void,
+    peer_account: *const c_char,
+) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    let Some(peer) = cstr(peer_account) else {
+        set_last_error("peer_account is null or not UTF-8");
+        return ptr::null_mut();
+    };
+    let convo_id = match h.client.create_direct_conversation(peer) {
+        Ok(id) => id.to_string(),
+        Err(e) => {
+            set_last_error(format!("create_conversation_offline failed: {e}"));
+            return ptr::null_mut();
+        }
+    };
+    use base64::Engine;
+    let welcome: Vec<String> = h
+        .client
+        .take_pending_outbound()
+        .into_iter()
+        .map(|(_addr, bytes)| base64::engine::general_purpose::STANDARD.encode(&bytes))
+        .collect();
+    to_c_string(
+        serde_json::json!({ "convoId": convo_id, "welcome": welcome }).to_string(),
+    )
 }
 
 /// List conversation ids as a JSON array string, e.g. `["id1","id2"]`. Caller frees.
@@ -514,6 +715,83 @@ pub unsafe extern "C" fn logoschat_send_message(
     }
 }
 
+/// #235: encrypt `content` for `convo_id` and return the outbound envelope
+/// WITHOUT publishing, so the caller can carry it over a non-node transport
+/// (e.g. BLE). Returns a JSON C string `{"deliveryAddress":"<hex>","dataB64":
+/// "<base64 wire bytes>"}` (caller frees with `logoschat_free_string`), or null
+/// on error (see `logoschat_last_error`). Advances forward-secrecy state ONCE —
+/// send the returned bytes; do NOT also `logoschat_send_message` the same content.
+/// Only 1:1 / GroupV1 conversations are supported.
+///
+/// # Safety
+/// `h` a valid handle; `convo_id` a valid C string; `content` points to `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_encrypt_for_convo(
+    h: *mut c_void,
+    convo_id: *const c_char,
+    content: *const u8,
+    len: usize,
+) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    let Some(convo) = cstr(convo_id) else {
+        set_last_error("convo_id null or not UTF-8");
+        return ptr::null_mut();
+    };
+    let bytes = if content.is_null() || len == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(content, len) }
+    };
+    match h.client.encrypt_for_convo(convo, bytes) {
+        Ok(env) => {
+            use base64::Engine;
+            let data_b64 = base64::engine::general_purpose::STANDARD.encode(&env.data);
+            to_c_string(format!(
+                r#"{{"deliveryAddress":{},"dataB64":{}}}"#,
+                json_str(&env.delivery_address),
+                json_str(&data_b64),
+            ))
+        }
+        Err(e) => {
+            set_last_error(format!("encrypt_for_convo failed: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// #235: hand raw inbound ciphertext (arriving over a non-node transport, e.g.
+/// BLE) to the client; it is decoded, decrypted, de-duped and drives the same
+/// events as a node message. Non-blocking. Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `h` a valid handle; `data` points to `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_ingest_ciphertext(
+    h: *mut c_void,
+    data: *const u8,
+    len: usize,
+) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    if data.is_null() || len == 0 {
+        set_last_error("ingest_ciphertext: empty data");
+        return -1;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
+    match h.client.ingest_ciphertext(bytes) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("ingest_ciphertext failed: {e}"));
+            -1
+        }
+    }
+}
+
 fn event_json(ev: &Event) -> (c_int, String) {
     match ev {
         Event::ConversationStarted { convo_id, class } => (
@@ -546,6 +824,10 @@ fn event_json(ev: &Event) -> (c_int, String) {
         }
         Event::ConversationMembersChanged { convo_id } => (
             EVENT_MEMBERS_CHANGED,
+            format!(r#"{{"convoId":{}}}"#, json_str(convo_id)),
+        ),
+        Event::ConversationDesynced { convo_id } => (
+            EVENT_CONVERSATION_DESYNCED,
             format!(r#"{{"convoId":{}}}"#, json_str(convo_id)),
         ),
         Event::InboundError { message } => (

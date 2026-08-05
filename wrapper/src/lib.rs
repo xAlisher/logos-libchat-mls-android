@@ -341,6 +341,36 @@ pub unsafe extern "C" fn logoschat_add_group_member(
     }
 }
 
+/// #349: remove OTHER member `peer_address` from group `convo_id` (creator-gated
+/// at the app layer). Produces an MLS Remove commit that advances the epoch and
+/// ejects the target; every remaining member applies it and the removed leaf can
+/// no longer decrypt. Returns 0 on success, -1 else (`logoschat_last_error`).
+///
+/// # Safety
+/// `h` a valid handle; `convo_id`/`peer_address` valid C strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_remove_group_member(
+    h: *mut c_void,
+    convo_id: *const c_char,
+    peer_address: *const c_char,
+) -> c_int {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return -1;
+    };
+    let (Some(convo), Some(peer)) = (cstr(convo_id), cstr(peer_address)) else {
+        set_last_error("convo_id/peer_address null or not UTF-8");
+        return -1;
+    };
+    match h.client.remove_group_member(convo, &[peer]) {
+        Ok(()) => 0,
+        Err(e) => {
+            set_last_error(format!("remove_group_member failed: {e}"));
+            -1
+        }
+    }
+}
+
 /// Leave group `convo_id` (remove SELF from its roster). Returns 0 on success,
 /// -1 else. The removal is a de-mls consensus round: it is merged by the group's
 /// next commit, not when this call returns. Fails while the group is mid-round,

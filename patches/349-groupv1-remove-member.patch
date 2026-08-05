@@ -1,0 +1,149 @@
+--- a/core/conversations/src/conversation.rs
++++ b/core/conversations/src/conversation.rs
+@@ -100,6 +100,20 @@
+         ))
+     }
+ 
++    /// #349: remove OTHER members from the group (by signer id), producing an MLS
++    /// Commit that advances the epoch and ejects them. Default: unsupported —
++    /// only conversation kinds that model plain-MLS removal override this.
++    fn remove_member(
++        &mut self,
++        _cx: &mut ServiceContext<S>,
++        _members: &[IdentIdRef],
++    ) -> Result<(), ChatError> {
++        Err(ChatError::UnsupportedFunction(
++            self.id().to_string(),
++            "Remove Member".into(),
++        ))
++    }
++
+     // All GroupConvos MUST return ConvoMetadata
+     // the return type is Option<_> to support legacy ConvoTypes which
+     // are being phased out.
+--- a/core/conversations/src/conversation/group_v1.rs
++++ b/core/conversations/src/conversation/group_v1.rs
+@@ -761,6 +761,48 @@
+             .collect())
+     }
+ 
++    // #349: remove one or more members by signer id. Symmetric to add_member,
++    // but produces an MLS RemoveProposal+Commit (no Welcome) that advances the
++    // epoch and ejects the targets; every remaining member applies the commit
++    // and the removed leaf can no longer decrypt. A member's leaf credential
++    // content IS its signer id bytes (BasicCredential::new(id.as_str().as_bytes),
++    // see inbox_v2::identity), so we resolve leaves by matching that content.
++    fn remove_member(
++        &mut self,
++        cx: &mut ServiceContext<S>,
++        members: &[IdentIdRef],
++    ) -> Result<(), ChatError> {
++        if members.is_empty() {
++            return Ok(());
++        }
++
++        // Resolve each target signer id to its live MLS leaf index.
++        let targets: Vec<&[u8]> = members.iter().map(|m| m.as_str().as_bytes()).collect();
++        let leaves: Vec<LeafNodeIndex> = self
++            .mls_group
++            .members()
++            .filter(|m| targets.contains(&m.credential.serialized_content()))
++            .map(|m| m.index)
++            .collect();
++        if leaves.is_empty() {
++            return Err(ChatError::Protocol(
++                "remove_member: no matching group member for the given signer id(s)".into(),
++            ));
++        }
++
++        // NB: never `.unwrap()` an MLS op on a worker thread — surface the error.
++        let (commit, _welcome, _group_info) = self
++            .mls_group
++            .remove_members(&cx.mls_provider, &cx.mls_identity, &leaves)
++            .map_err(ChatError::generic)?;
++
++        self.mls_group
++            .merge_pending_commit(&cx.mls_provider)
++            .map_err(ChatError::generic)?;
++
++        self.send_payload(cx, commit.to_bytes()?)
++    }
++
+     fn metadata(&self) -> Option<ConvoMetadata> {
+         self.read_metadata()
+     }
+--- a/core/conversations/src/core.rs
++++ b/core/conversations/src/core.rs
+@@ -459,6 +459,45 @@
+         }
+     }
+ 
++    /// #349: remove other members from a group (creator-gated at the app layer).
++    /// Like group_add_member, checkpoints even on failure — a partially applied
++    /// remove still mutated MLS state and must not be lost.
++    pub fn group_remove_member(
++        &mut self,
++        convo_id: &str,
++        members: &[IdentIdRef],
++    ) -> Result<(), ChatError> {
++        let result = self.group_remove_member_inner(convo_id, members);
++        self.persist_mls_state()?;
++        result
++    }
++
++    fn group_remove_member_inner(
++        &mut self,
++        convo_id: &str,
++        members: &[IdentIdRef],
++    ) -> Result<(), ChatError> {
++        if self.cached_convos.contains_key(convo_id) {
++            let convo = self
++                .cached_convos
++                .get_mut(convo_id)
++                .ok_or_else(|| ChatError::NoConvo(convo_id.to_string()))?;
++
++            match convo {
++                ConvoTypeOwned::Group(group_convo) => {
++                    group_convo.remove_member(&mut self.services, members)
++                }
++                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
++                    convo.id().into(),
++                    "Remove Member".into(),
++                )),
++            }
++        } else {
++            let mut convo = self.load_group_convo(convo_id)?;
++            convo.remove_member(&mut self.services, members)
++        }
++    }
++
+     /// Each member's MLS leaf-credential content (hex-encoded); errors if
+     /// `convo_id` names a direct (non-group) conversation.
+     pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
+--- a/crates/generic-chat/src/client.rs
++++ b/crates/generic-chat/src/client.rs
+@@ -281,6 +281,24 @@
+             .map_err(Into::into)
+     }
+ 
++    /// #349: remove other accounts' devices from a group (creator-gated at the
++    /// app layer). Resolves each account to its signer (installation) ids and
++    /// removes every matching MLS leaf in one epoch-advancing commit. Mirrors
++    /// [`Self::add_group_members`].
++    pub fn remove_group_member(
++        &mut self,
++        convo_id: &str,
++        accounts: &[AccountAddressRef],
++    ) -> Result<(), ClientError> {
++        let signers = self.signers_from_accounts(accounts)?;
++        let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
++
++        self.core
++            .lock()
++            .group_remove_member(convo_id, &signer_refs)
++            .map_err(Into::into)
++    }
++
+     /// Leave a group conversation: stage the removal of THIS client from the
+     /// group's roster. Like [`Self::add_group_members`] the removal runs as a
+     /// consensus round — it is merged by the group's next commit, not when this

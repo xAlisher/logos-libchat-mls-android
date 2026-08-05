@@ -52,6 +52,9 @@ if ! grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/buil
   git apply --summary "$REPO_DIR/patches/libchat-android-arm64.patch" \
     | awk '/^ create mode /{print $4}' | xargs -r rm -f
   git apply "$REPO_DIR/patches/libchat-android-arm64.patch"
+  # #349: creator-gated remove-other-member for GroupV1 (additive; kept as a
+  # separate patch so it never risks corrupting the main graph-hiding monolith).
+  git apply "$REPO_DIR/patches/349-groupv1-remove-member.patch"
 fi
 grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs \
   || { echo "patch did not apply"; exit 1; }

@@ -10,7 +10,7 @@
 +    fn remove_member(
 +        &mut self,
 +        _cx: &mut ServiceContext<S>,
-+        _members: &[IdentIdRef],
++        _targets: &[Vec<u8>],
 +    ) -> Result<(), ChatError> {
 +        Err(ChatError::UnsupportedFunction(
 +            self.id().to_string(),
@@ -23,7 +23,7 @@
      // are being phased out.
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
-@@ -761,6 +761,48 @@
+@@ -761,6 +761,55 @@
              .collect())
      }
  
@@ -36,23 +36,30 @@
 +    fn remove_member(
 +        &mut self,
 +        cx: &mut ServiceContext<S>,
-+        members: &[IdentIdRef],
++        targets: &[Vec<u8>],
 +    ) -> Result<(), ChatError> {
-+        if members.is_empty() {
++        if targets.is_empty() {
 +            return Ok(());
 +        }
 +
-+        // Resolve each target signer id to its live MLS leaf index.
-+        let targets: Vec<&[u8]> = members.iter().map(|m| m.as_str().as_bytes()).collect();
++        // Targets are LEAF CREDENTIAL contents (serialized DelegateCredential bytes) — the
++        // exact `serialized_content()` an MLS leaf carries. The caller (client facade)
++        // resolves the account → its leaf credential(s) via the directory, because the
++        // account address and the signer id are NOT the leaf credential (that mismatch was
++        // the bug the on-device test caught). Match by raw bytes.
 +        let leaves: Vec<LeafNodeIndex> = self
 +            .mls_group
 +            .members()
-+            .filter(|m| targets.contains(&m.credential.serialized_content()))
++            .filter(|m| {
++                targets
++                    .iter()
++                    .any(|t| t.as_slice() == m.credential.serialized_content())
++            })
 +            .map(|m| m.index)
 +            .collect();
 +        if leaves.is_empty() {
 +            return Err(ChatError::Protocol(
-+                "remove_member: no matching group member for the given signer id(s)".into(),
++                "remove_member: no matching group member for the given credential(s)".into(),
 +            ));
 +        }
 +
@@ -84,9 +91,9 @@
 +    pub fn group_remove_member(
 +        &mut self,
 +        convo_id: &str,
-+        members: &[IdentIdRef],
++        targets: &[Vec<u8>],
 +    ) -> Result<(), ChatError> {
-+        let result = self.group_remove_member_inner(convo_id, members);
++        let result = self.group_remove_member_inner(convo_id, targets);
 +        self.persist_mls_state()?;
 +        result
 +    }
@@ -94,7 +101,7 @@
 +    fn group_remove_member_inner(
 +        &mut self,
 +        convo_id: &str,
-+        members: &[IdentIdRef],
++        targets: &[Vec<u8>],
 +    ) -> Result<(), ChatError> {
 +        if self.cached_convos.contains_key(convo_id) {
 +            let convo = self
@@ -104,7 +111,7 @@
 +
 +            match convo {
 +                ConvoTypeOwned::Group(group_convo) => {
-+                    group_convo.remove_member(&mut self.services, members)
++                    group_convo.remove_member(&mut self.services, targets)
 +                }
 +                ConvoTypeOwned::Direct(convo) => Err(ChatError::UnsupportedFunction(
 +                    convo.id().into(),
@@ -113,7 +120,7 @@
 +            }
 +        } else {
 +            let mut convo = self.load_group_convo(convo_id)?;
-+            convo.remove_member(&mut self.services, members)
++            convo.remove_member(&mut self.services, targets)
 +        }
 +    }
 +
@@ -122,7 +129,7 @@
      pub fn group_members(&mut self, convo_id: &str) -> Result<Vec<Vec<u8>>, ChatError> {
 --- a/crates/generic-chat/src/client.rs
 +++ b/crates/generic-chat/src/client.rs
-@@ -281,6 +281,24 @@
+@@ -281,6 +281,46 @@
              .map_err(Into::into)
      }
  
@@ -135,12 +142,34 @@
 +        convo_id: &str,
 +        accounts: &[AccountAddressRef],
 +    ) -> Result<(), ClientError> {
-+        let signers = self.signers_from_accounts(accounts)?;
-+        let signer_refs: Vec<IdentIdRef> = signers.iter().collect();
++        // A GroupV1 leaf carries a serialized DelegateCredential — NOT the account
++        // address or the signer id (that mismatch was the bug the on-device test caught).
++        // Resolve each target account to its actual leaf credential(s) the same way
++        // `group_members` maps a leaf → account (via the directory), then remove by the
++        // credential bytes the leaf actually holds.
++        let matches = |id: &str| accounts.iter().any(|a| id.eq_ignore_ascii_case(a));
++        let credentials = self.core.lock().group_members(convo_id)?;
++        let wanted: Vec<Vec<u8>> = credentials
++            .into_iter()
++            .filter(|cred| {
++                roster_member(&self.directory, cred).is_some_and(|m| {
++                    m.account
++                        .as_ref()
++                        .is_some_and(|acc| matches(acc.as_str()))
++                        || matches(m.local_identity.as_str())
++                })
++            })
++            .collect();
++        if wanted.is_empty() {
++            return Err(libchat::ChatError::Protocol(
++                "remove_group_member: no group member matched the given account(s)".into(),
++            )
++            .into());
++        }
 +
 +        self.core
 +            .lock()
-+            .group_remove_member(convo_id, &signer_refs)
++            .group_remove_member(convo_id, &wanted)
 +            .map_err(Into::into)
 +    }
 +

@@ -1,7 +1,7 @@
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
-@@ -152,6 +152,29 @@
+@@ -152,6 +152,42 @@
          })
  }
  
@@ -28,10 +28,23 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
 +        .filter(|creator| !creator.is_empty())
 +}
 +
++/// #437 security: may an incoming re-add welcome REPLACE our existing group state?
++///
++/// Replacement — adopting a strictly-newer-epoch welcome for a group we already hold
++/// — is a #350 recovery, and only the creator drives one (remove-then-add). So, exactly
++/// like [`removes_authorized`], it is allowed only when the welcome's authenticated
++/// author (`StagedWelcome::welcome_sender`) matches the `creator` recorded in our
++/// existing group's authenticated group-context metadata. `creator == None` (a pre-#349
++/// group or the 1-1 delegate — no recorded authority) fails closed: never replace, so a
++/// forged/replayed higher-epoch welcome cannot clobber a group that has no creator anchor.
++fn replace_authorized(creator: Option<&[u8]>, author: &[u8]) -> bool {
++    creator == Some(author)
++}
++
  impl std::fmt::Debug for GroupV1Convo {
      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
          f.debug_struct("GroupV1Convo")
-@@ -223,13 +246,73 @@
+@@ -223,13 +259,73 @@
          // `.unwrap()` here panics on a worker thread and SIGSEGVs the whole
          // process. This fires routinely via the store catch-up replaying an old
          // welcome into a phone that already holds the group.
@@ -81,7 +94,7 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
 +                .welcome_sender()
 +                .map(|leaf| leaf.credential().serialized_content().to_vec())
 +                .map_err(ChatError::generic)?;
-+            if creator.as_deref() != Some(author.as_slice()) {
++            if !replace_authorized(creator.as_deref(), &author) {
 +                // Pre-#349 group (no recorded creator) or a non-creator author → refuse.
 +                // Surface as an "already exists" error so the inbound pipeline treats it
 +                // as the benign duplicate it must not act on (matches the replay path).
@@ -107,7 +120,7 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
  
          let convo_id = hex::encode(mls_group.group_id().as_slice());
          let (outer_key, route_tag) = Self::seal_material(&mls_group);
-@@ -467,19 +550,7 @@
+@@ -467,19 +563,7 @@
      /// are identical for every member, so this cannot be forged by a peer. It can only
      /// change through a GroupContextExtensions commit, which this client never sends.
      fn creator_credential(&self) -> Option<Vec<u8>> {
@@ -128,6 +141,58 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
      }
  
      /// The leaf-credential content at `index` in the CURRENT (pre-merge) roster.
+@@ -1299,3 +1383,51 @@
+         ));
+     }
+ }
++
++#[cfg(test)]
++mod replace_auth_tests {
++    use super::replace_authorized;
++
++    const CREATOR: &[u8] = b"creator-leaf-credential";
++    const MALLORY: &[u8] = b"mallory-leaf-credential";
++
++    // The legitimate #350 recovery: the creator's own re-add welcome may replace our
++    // stale/desynced group state so we rejoin.
++    #[test]
++    fn creator_authored_welcome_replaces() {
++        assert!(
++            replace_authorized(Some(CREATOR), CREATOR),
++            "the recorded creator's re-add welcome must be allowed to replace our group"
++        );
++    }
++
++    // The attack from the review: adds are NOT creator-gated, so a non-creator can fork
++    // the group and ship a valid higher-epoch welcome. Replacing on such a welcome must
++    // be refused — a newer epoch is not authorization to overwrite our state.
++    #[test]
++    fn non_creator_welcome_cannot_replace() {
++        assert!(
++            !replace_authorized(Some(CREATOR), MALLORY),
++            "a non-creator's welcome must never replace our group state (#437 hijack guard)"
++        );
++    }
++
++    // Fail closed with no recorded creator (pre-#349 group / 1-1 delegate): a forged or
++    // replayed higher-epoch welcome must not clobber a group that has no creator anchor.
++    #[test]
++    fn absent_creator_never_replaces() {
++        assert!(!replace_authorized(None, CREATOR));
++        assert!(!replace_authorized(None, MALLORY));
++    }
++
++    // Exact-bytes comparison — a prefix or extension of the creator credential is not the
++    // creator (guards against a truncating / `starts_with` regression, mirroring #349).
++    #[test]
++    fn author_match_is_exact() {
++        assert!(!replace_authorized(
++            Some(CREATOR),
++            &CREATOR[..CREATOR.len() - 1]
++        ));
++        assert!(!replace_authorized(Some(CREATOR), b"creator-leaf-credential-x"));
++    }
++}
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
 --- a/core/conversations/src/core.rs
 +++ b/core/conversations/src/core.rs

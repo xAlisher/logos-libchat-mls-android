@@ -1,4 +1,41 @@
+# SHA-256 of the arm64-v8a artifacts this repo PUBLISHES.
+#
+# This file is the authoritative record of which binary a given revision of this
+# repo stands behind. Its consumer (xAlisher/peers) pins its bundled copy against
+# these hashes, so publishing a stale hash here silently breaks the consumer's
+# provenance chain -- refresh it in the SAME commit as any rebuild.
+#
+# Verify:  sha256sum -c SHA256SUMS
+#
+# liblogoschat.so 6dd23bc7... is the #348 + #349 + #437 build:
+#   upstream logos-messaging/libchat @ d2124fd
+#   + patches/libchat-android-arm64.patch
+#   + patches/349-groupv1-remove-member.patch
+#   + patches/437-replace-on-desync-welcome.patch
+#   built by scripts/build-android-arm64.sh (NDK r27, aarch64-linux-android,
+#   release, then `llvm-strip --strip-unneeded`); 25 exported logoschat_* symbols.
+#
+# It supersedes 8f4fbdc60c0f13e245eb9c65cf1ad248699c843532ab59cbb6ad0e6dafe9bcb6,
+# which this file published up to 6b6305f and which PREDATES all three patches
+# (no logoschat_catchup_now, no logoschat_remove_group_member, no
+# replace-on-desync welcome -- it would not even link against the consumer's JNI
+# bridge). Do not restore it.
+#
+# THIS BUILD IS NOT BIT-FOR-BIT REPRODUCIBLE -- measured, not assumed. A full
+# `cargo clean` + rerun of the build script on the SAME host, same source, same
+# build path produced 8122308001e01c051925e844368951c58e786efbbd8f192c548b2ae0e7a97273f
+# instead: same byte size, identical exported-symbol set, and the only differing
+# STRING is an AWS-LC build stamp (`built on: <UTC date>`, from the aws-lc-rs /
+# aws-lc-sys cmake build) -- the remaining ~136 KB of delta is .rodata/.text/
+# .rela.dyn layout churn behind it. So a hash cannot be re-derived from source
+# here, and PUBLISHING THE EXACT ARTIFACT (this file) is the only sound
+# provenance available at this revision. Removing the timestamp stamp and
+# proving determinism is tracked as peers#366.
+#
+# liblogosdelivery.so / librln.so / libc++_shared.so are vendored from
+# xAlisher/logos-libdelivery-android purely as build-time link inputs here; the
+# app ships that repo's own published copies, which may be newer.
 e69496a4aeb51ebe61d0775ae9fefc76eee640f12317aa5174da67e5d4ec8fd6  libc++_shared.so
-8f4fbdc60c0f13e245eb9c65cf1ad248699c843532ab59cbb6ad0e6dafe9bcb6  liblogoschat.so
+6dd23bc7e93e94c35ba5fb913dc0b65217b67dc6df1911880e30b254389fef31  liblogoschat.so
 58c766b9d7463c4973bbda86925bc9fee9d32547c49898bdbe8dad8256b0e495  liblogosdelivery.so
 766bd58a36f9233a4647bcba16f9192a6cb691a211950401b8e0d6c826478e45  librln.so

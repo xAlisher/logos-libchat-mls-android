@@ -49,15 +49,22 @@ if ! grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/buil
   # `git checkout -f` above reverts TRACKED files but leaves the files the patch
   # ADDS behind as untracked, so a re-run on an existing BUILD_DIR would die with
   # "already exists in working directory". Drop exactly the patch's created files.
-  git apply --summary "$REPO_DIR/patches/libchat-android-arm64.patch" \
-    | awk '/^ create mode /{print $4}' | xargs -r rm -f
+  for p in libchat-android-arm64 349-groupv1-remove-member; do
+    git apply --summary "$REPO_DIR/patches/$p.patch" \
+      | awk '/^ create mode /{print $4}' | xargs -r rm -f
+  done
   git apply "$REPO_DIR/patches/libchat-android-arm64.patch"
   # #349: creator-gated remove-other-member for GroupV1 (additive; kept as a
   # separate patch so it never risks corrupting the main graph-hiding monolith).
+  # Carries the receive-side removal-authorization gate + its tests.
   git apply "$REPO_DIR/patches/349-groupv1-remove-member.patch"
 fi
 grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs \
   || { echo "patch did not apply"; exit 1; }
+# #349: the receive-side gate is the security boundary — fail the build if the
+# patch landed without it rather than shipping a silently unenforced removal.
+grep -q 'removes_authorized' core/conversations/src/conversation/group_v1.rs \
+  || { echo "#349 removal-authorization gate missing"; exit 1; }
 
 echo "==> 3/6 NDK + aws-lc-rs + delivery-node env"
 export CC_aarch64_linux_android=$CLANG

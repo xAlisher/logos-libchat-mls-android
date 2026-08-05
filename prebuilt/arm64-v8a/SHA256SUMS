@@ -7,7 +7,7 @@
 #
 # Verify:  sha256sum -c SHA256SUMS
 #
-# liblogoschat.so 6dd23bc7... is the #348 + #349 + #437 build:
+# liblogoschat.so 6b12a4fb... is the #348 + #349 + #437 build:
 #   upstream logos-messaging/libchat @ d2124fd
 #   + patches/libchat-android-arm64.patch
 #   + patches/349-groupv1-remove-member.patch
@@ -15,15 +15,26 @@
 #   built by scripts/build-android-arm64.sh (NDK r27, aarch64-linux-android,
 #   release, then `llvm-strip --strip-unneeded`); 25 exported logoschat_* symbols.
 #
-# It supersedes 8f4fbdc60c0f13e245eb9c65cf1ad248699c843532ab59cbb6ad0e6dafe9bcb6,
+# It supersedes 6dd23bc7e93e94c35ba5fb913dc0b65217b67dc6df1911880e30b254389fef31,
+# which this file published at 04bc30d, and which carries the SAME 25 exported
+# symbols but an UNGATED replace-on-desync path: it adopts any newer re-add
+# Welcome, not only one authored by the recorded group creator. The gate landed
+# in 7bbfaee and its unit tests in 10518fe (`replace_authorized`); the build
+# published here is the first artifact that contains them. That is a security
+# difference with no ABI signal, which is exactly why the hash has to move with
+# it -- do not restore 6dd23bc7.
+#
+# Both also supersede 8f4fbdc60c0f13e245eb9c65cf1ad248699c843532ab59cbb6ad0e6dafe9bcb6,
 # which this file published up to 6b6305f and which PREDATES all three patches
 # (no logoschat_catchup_now, no logoschat_remove_group_member, no
 # replace-on-desync welcome -- it would not even link against the consumer's JNI
 # bridge). Do not restore it.
 #
-# THIS BUILD IS NOT BIT-FOR-BIT REPRODUCIBLE -- measured, not assumed. A full
-# `cargo clean` + rerun of the build script on the SAME host, same source, same
-# build path produced 8122308001e01c051925e844368951c58e786efbbd8f192c548b2ae0e7a97273f
+# THIS BUILD IS NOT BIT-FOR-BIT REPRODUCIBLE -- measured, not assumed. The
+# measurement was taken on the 6dd23bc7 build (same toolchain, same script, and
+# the non-determinism is toolchain-side, so it carries): a full `cargo clean` +
+# rerun of the build script on the SAME host, same source, same
+# build path produced 812230801e01c051925e844368951c58e786efbbd8f192c548b2ae0e7a97273f
 # instead: same byte size, identical exported-symbol set, and the only differing
 # STRING is an AWS-LC build stamp (`built on: <UTC date>`, from the aws-lc-rs /
 # aws-lc-sys cmake build) -- the remaining ~136 KB of delta is .rodata/.text/
@@ -36,6 +47,6 @@
 # xAlisher/logos-libdelivery-android purely as build-time link inputs here; the
 # app ships that repo's own published copies, which may be newer.
 e69496a4aeb51ebe61d0775ae9fefc76eee640f12317aa5174da67e5d4ec8fd6  libc++_shared.so
-6dd23bc7e93e94c35ba5fb913dc0b65217b67dc6df1911880e30b254389fef31  liblogoschat.so
+6b12a4fb4633005dcabf2e0f06a27b1f30be3ccc9aecc786ab4de2946e398515  liblogoschat.so
 58c766b9d7463c4973bbda86925bc9fee9d32547c49898bdbe8dad8256b0e495  liblogosdelivery.so
 766bd58a36f9233a4647bcba16f9192a6cb691a211950401b8e0d6c826478e45  librln.so

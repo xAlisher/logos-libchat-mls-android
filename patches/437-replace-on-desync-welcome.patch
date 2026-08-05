@@ -1,7 +1,7 @@
 diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
 --- a/core/conversations/src/conversation/group_v1.rs
 +++ b/core/conversations/src/conversation/group_v1.rs
-@@ -152,6 +152,42 @@
+@@ -152,6 +152,58 @@
          })
  }
  
@@ -31,20 +31,36 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
 +/// #437 security: may an incoming re-add welcome REPLACE our existing group state?
 +///
 +/// Replacement — adopting a strictly-newer-epoch welcome for a group we already hold
-+/// — is a #350 recovery, and only the creator drives one (remove-then-add). So, exactly
-+/// like [`removes_authorized`], it is allowed only when the welcome's authenticated
-+/// author (`StagedWelcome::welcome_sender`) matches the `creator` recorded in our
-+/// existing group's authenticated group-context metadata. `creator == None` (a pre-#349
-+/// group or the 1-1 delegate — no recorded authority) fails closed: never replace, so a
-+/// forged/replayed higher-epoch welcome cannot clobber a group that has no creator anchor.
-+fn replace_authorized(creator: Option<&[u8]>, author: &[u8]) -> bool {
-+    creator == Some(author)
++/// — is a #350 recovery, and only the creator drives one (remove-then-add). So it is
++/// allowed only when the welcome's authenticated author (`StagedWelcome::welcome_sender`,
++/// whose signature openmls has verified) signed with the SAME key as the `creator`
++/// recorded in our existing group's authenticated group-context metadata.
++///
++/// The recorded `creator` is a signer id = `hex(creator's Ed25519 verifying key)` (the
++/// leaf `BasicCredential`), so we decode it and compare against the author's raw
++/// `signature_key`. Binding to the key, not the credential bytes, is what makes this
++/// unforgeable: a peer can copy the creator's id into a credential, but cannot sign a
++/// leaf with the creator's private key, so its `signature_key` will not match. A
++/// `creator == None` (pre-#349 group / 1-1 delegate) or an un-decodable creator id fails
++/// closed: never replace, so a forged/replayed higher-epoch welcome cannot clobber a
++/// group that has no usable creator anchor.
++fn replace_authorized(creator: Option<&[u8]>, author_key: &[u8]) -> bool {
++    let Some(creator) = creator else {
++        return false;
++    };
++    match std::str::from_utf8(creator)
++        .ok()
++        .and_then(|s| hex::decode(s).ok())
++    {
++        Some(creator_key) => !creator_key.is_empty() && creator_key == author_key,
++        None => false,
++    }
 +}
 +
  impl std::fmt::Debug for GroupV1Convo {
      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
          f.debug_struct("GroupV1Convo")
-@@ -223,13 +259,73 @@
+@@ -223,13 +275,78 @@
          // `.unwrap()` here panics on a worker thread and SIGSEGVs the whole
          // process. This fires routinely via the store catch-up replaying an old
          // welcome into a phone that already holds the group.
@@ -90,11 +106,16 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
 +                .replace_old_group()
 +                .build()
 +                .map_err(ChatError::generic)?;
-+            let author = staged
++            // Bind to the author's authenticated SIGNING KEY, not credential bytes: the
++            // welcome sender is the member who committed the re-add, and openmls has
++            // verified they signed with this `signature_key`. An impersonator can put the
++            // creator's id in a credential but cannot sign a leaf with the creator's key,
++            // so its signature_key won't match — closing credential-byte spoofing.
++            let author_key = staged
 +                .welcome_sender()
-+                .map(|leaf| leaf.credential().serialized_content().to_vec())
++                .map(|leaf| leaf.signature_key().as_slice().to_vec())
 +                .map_err(ChatError::generic)?;
-+            if !replace_authorized(creator.as_deref(), &author) {
++            if !replace_authorized(creator.as_deref(), &author_key) {
 +                // Pre-#349 group (no recorded creator) or a non-creator author → refuse.
 +                // Surface as an "already exists" error so the inbound pipeline treats it
 +                // as the benign duplicate it must not act on (matches the replay path).
@@ -120,7 +141,7 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
  
          let convo_id = hex::encode(mls_group.group_id().as_slice());
          let (outer_key, route_tag) = Self::seal_material(&mls_group);
-@@ -467,19 +563,7 @@
+@@ -467,19 +584,7 @@
      /// are identical for every member, so this cannot be forged by a peer. It can only
      /// change through a GroupContextExtensions commit, which this client never sends.
      fn creator_credential(&self) -> Option<Vec<u8>> {
@@ -141,7 +162,7 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
      }
  
      /// The leaf-credential content at `index` in the CURRENT (pre-merge) roster.
-@@ -1299,3 +1383,51 @@
+@@ -1299,3 +1404,63 @@
          ));
      }
  }
@@ -150,47 +171,59 @@ diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversation
 +mod replace_auth_tests {
 +    use super::replace_authorized;
 +
-+    const CREATOR: &[u8] = b"creator-leaf-credential";
-+    const MALLORY: &[u8] = b"mallory-leaf-credential";
++    // The recorded creator anchor is a signer id = hex(Ed25519 verifying key); the author
++    // passed to the gate is the welcome sender's RAW signature_key bytes.
++    const CREATOR_KEY: &[u8] = &[0xAAu8; 32];
++    const MALLORY_KEY: &[u8] = &[0xBBu8; 32];
 +
-+    // The legitimate #350 recovery: the creator's own re-add welcome may replace our
-+    // stale/desynced group state so we rejoin.
++    fn creator_id(key: &[u8]) -> Vec<u8> {
++        hex::encode(key).into_bytes()
++    }
++
++    // Legitimate #350 recovery: the creator's own re-add welcome — signed with the
++    // creator's key — may replace our stale/desynced state so we rejoin.
 +    #[test]
-+    fn creator_authored_welcome_replaces() {
++    fn creator_key_authors_replace() {
 +        assert!(
-+            replace_authorized(Some(CREATOR), CREATOR),
-+            "the recorded creator's re-add welcome must be allowed to replace our group"
++            replace_authorized(Some(&creator_id(CREATOR_KEY)), CREATOR_KEY),
++            "a welcome signed with the recorded creator key must be allowed to replace"
 +        );
 +    }
 +
-+    // The attack from the review: adds are NOT creator-gated, so a non-creator can fork
-+    // the group and ship a valid higher-epoch welcome. Replacing on such a welcome must
-+    // be refused — a newer epoch is not authorization to overwrite our state.
++    // The review's hijack: adds are not creator-gated, so a non-creator can fork the group
++    // and ship a valid higher-epoch welcome — but it is signed with THEIR key, which does
++    // not match the recorded creator key, so it must be refused. This also defeats
++    // credential-byte spoofing: copying the creator's id into a credential doesn't help,
++    // the gate only trusts the authenticated signing key.
 +    #[test]
-+    fn non_creator_welcome_cannot_replace() {
++    fn non_creator_key_cannot_replace() {
 +        assert!(
-+            !replace_authorized(Some(CREATOR), MALLORY),
-+            "a non-creator's welcome must never replace our group state (#437 hijack guard)"
++            !replace_authorized(Some(&creator_id(CREATOR_KEY)), MALLORY_KEY),
++            "a welcome signed with a non-creator key must never replace our group (#437)"
 +        );
 +    }
 +
-+    // Fail closed with no recorded creator (pre-#349 group / 1-1 delegate): a forged or
-+    // replayed higher-epoch welcome must not clobber a group that has no creator anchor.
++    // Fail closed with no recorded creator (pre-#349 group / 1-1 delegate).
 +    #[test]
 +    fn absent_creator_never_replaces() {
-+        assert!(!replace_authorized(None, CREATOR));
-+        assert!(!replace_authorized(None, MALLORY));
++        assert!(!replace_authorized(None, CREATOR_KEY));
++        assert!(!replace_authorized(None, MALLORY_KEY));
 +    }
 +
-+    // Exact-bytes comparison — a prefix or extension of the creator credential is not the
-+    // creator (guards against a truncating / `starts_with` regression, mirroring #349).
++    // A malformed / non-hex / empty creator id fails closed rather than matching anything.
 +    #[test]
-+    fn author_match_is_exact() {
++    fn malformed_creator_id_fails_closed() {
++        assert!(!replace_authorized(Some(b"not-hex-zzzz"), CREATOR_KEY));
++        assert!(!replace_authorized(Some(b""), &[]));
++    }
++
++    // Exact key match — a truncated creator key is not the creator.
++    #[test]
++    fn key_match_is_exact() {
 +        assert!(!replace_authorized(
-+            Some(CREATOR),
-+            &CREATOR[..CREATOR.len() - 1]
++            Some(&creator_id(CREATOR_KEY)),
++            &CREATOR_KEY[..CREATOR_KEY.len() - 1]
 +        ));
-+        assert!(!replace_authorized(Some(CREATOR), b"creator-leaf-credential-x"));
 +    }
 +}
 diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs

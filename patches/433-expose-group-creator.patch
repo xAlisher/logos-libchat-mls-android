@@ -1,0 +1,102 @@
+diff --git a/core/conversations/src/conversation.rs b/core/conversations/src/conversation.rs
+index 7137fc0..91cde17 100644
+--- a/core/conversations/src/conversation.rs
++++ b/core/conversations/src/conversation.rs
+@@ -134,6 +134,12 @@ pub(crate) trait GroupConvo<S: ExternalServices>: Convo<S> + std::fmt::Debug + S
+     // the return type is Option<_> to support legacy ConvoTypes which
+     // are being phased out.
+     fn metadata(&self) -> Option<ConvoMetadata>;
++
++    /// #433: the group's recorded creator as its address hex string, or `None` when
++    /// the group records no creator (a GroupV1 created before #349, or a GroupV2).
++    /// Read from the authenticated group-context metadata extension (see
++    /// `ConvoMetaInfo::creator`), so every member reads the identical value.
++    fn creator(&self) -> Option<String>;
+ }
+ 
+ pub(crate) trait Identified {
+diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
+index 94592e0..5f33b7f 100644
+--- a/core/conversations/src/conversation/group_v1.rs
++++ b/core/conversations/src/conversation/group_v1.rs
+@@ -1024,6 +1024,16 @@ impl<S: ExternalServices> GroupConvo<S> for GroupV1Convo {
+         self.read_metadata()
+     }
+ 
++    // #433: the recorded creator id is the creator's leaf-credential content, which
++    // for our BasicCredential is the ASCII-hex address string (the same value
++    // `replace_authorized` hex-decodes). Surface it verbatim; `None` when the group
++    // records no creator (pre-#349) or the bytes aren't valid UTF-8.
++    fn creator(&self) -> Option<String> {
++        self.creator_credential()
++            .and_then(|bytes| String::from_utf8(bytes).ok())
++            .filter(|s| !s.is_empty())
++    }
++
+     // #graph-hiding Phase 1b test hook: expose the live MLS epoch so the
+     // epoch-stability test can PROVE a commit advanced the epoch (and then assert
+     // the route_tag/outer_key are unchanged across it). Not used in production.
+diff --git a/core/conversations/src/conversation/group_v2.rs b/core/conversations/src/conversation/group_v2.rs
+index 8bb56ad..b957779 100644
+--- a/core/conversations/src/conversation/group_v2.rs
++++ b/core/conversations/src/conversation/group_v2.rs
+@@ -432,6 +432,11 @@ where
+         res.map(Into::into)
+     }
+ 
++    // #433: GroupV2 records no creator (the #349 creator extension is GroupV1-only).
++    fn creator(&self) -> Option<String> {
++        None
++    }
++
+     // fn conversation_state(&self) -> Result<ConversationState, ChatError> {
+     //     Ok(self
+     //         .conversation
+diff --git a/core/conversations/src/core.rs b/core/conversations/src/core.rs
+index e358335..0c98de9 100644
+--- a/core/conversations/src/core.rs
++++ b/core/conversations/src/core.rs
+@@ -880,6 +880,21 @@ impl<'a, S: ExternalServices + 'static> Core<S> {
+                 .ok_or_else(unsupported),
+         }
+     }
++
++    /// #433: the group's recorded creator as its address hex, or `None` when no
++    /// creator is recorded (pre-#349 GroupV1, GroupV2, or a direct convo). Mirrors
++    /// [`Self::convo_metadata`]'s lazy-load-on-restart so a reloaded GroupV1 still
++    /// answers instead of reporting the group dead.
++    pub fn convo_creator(
++        &mut self,
++        convo_id: ConversationIdRef,
++    ) -> Result<Option<String>, ChatError> {
++        match self.cached_convos.get(convo_id) {
++            Some(ConvoTypeOwned::Group(group_convo)) => Ok(group_convo.creator()),
++            Some(ConvoTypeOwned::Direct(_)) => Ok(None),
++            None => Ok(self.load_group_convo(convo_id)?.creator()),
++        }
++    }
+ }
+ 
+ /// A GroupV2 row exists in the store (so the conversation is still listed), but
+diff --git a/crates/generic-chat/src/client.rs b/crates/generic-chat/src/client.rs
+index a6eaa2f..0deb074 100644
+--- a/crates/generic-chat/src/client.rs
++++ b/crates/generic-chat/src/client.rs
+@@ -359,6 +359,17 @@ where
+             .map_err(Into::into)
+     }
+ 
++    /// #433: the group's recorded creator as its address hex, or `None` when no
++    /// creator is recorded (pre-#349 group, GroupV2, or a direct convo). Lets a
++    /// non-creator member address the actual creator (e.g. to ping them to re-create
++    /// a dead group) instead of guessing at the roster.
++    pub fn group_creator(&self, convo_id: &str) -> Result<Option<String>, ClientError> {
++        self.core
++            .lock()
++            .convo_creator(convo_id)
++            .map_err(Into::into)
++    }
++
+     /// Checkpoint the MLS state into the encrypted store.
+     ///
+     /// Every conversation operation already checkpoints, so this is only needed

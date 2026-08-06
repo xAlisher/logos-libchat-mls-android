@@ -629,6 +629,38 @@ pub unsafe extern "C" fn logoschat_group_metadata(
     }
 }
 
+/// #433: the group's recorded creator as its address hex, or an EMPTY string when the
+/// group records no creator (a GroupV1 created before #349, or a GroupV2). Lets a
+/// non-creator member address the actual creator (e.g. ping them to re-create a dead
+/// group) instead of guessing at the roster. Caller frees.
+///
+/// Returns null (see `logoschat_last_error`) for an unknown `convo_id` — an error,
+/// distinct from the empty-string "no creator recorded".
+///
+/// # Safety
+/// `h` a valid handle; `convo_id` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_group_creator(
+    h: *mut c_void,
+    convo_id: *const c_char,
+) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    let Some(convo) = cstr(convo_id) else {
+        set_last_error("convo_id is null or not UTF-8");
+        return ptr::null_mut();
+    };
+    match h.client.group_creator(convo) {
+        Ok(creator) => to_c_string(creator.unwrap_or_default()),
+        Err(e) => {
+            set_last_error(format!("group_creator failed: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
 /// The group's CURRENT roster as a JSON array string,
 /// `[{"account":"<hex>","device":"<hex>"}, …]`. Caller frees.
 ///

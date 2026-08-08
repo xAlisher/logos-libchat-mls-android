@@ -445,7 +445,10 @@ pub unsafe extern "C" fn logoschat_catchup_now(h: *mut c_void) -> c_int {
 
 /// #239: our contact card as JSON — everything a peer needs to add us to an MLS
 /// conversation OFFLINE (over BLE), without the HTTP registry:
-/// `{account, device, keyPackage, bundlePayload, bundleSig}` (byte fields base64).
+/// `{account, device, kpPayload, kpSig, bundlePayload, bundleSig}` (byte fields
+/// base64). `kpPayload` is the signed key-package publication (the raw key package
+/// is recoverable from it) and `kpSig` proves the device published it — the
+/// importer verifies both (GHSA-xxgx-7757-3qq6).
 /// Null on failure (e.g. register/publish haven't run). Caller frees.
 ///
 /// # Safety
@@ -457,14 +460,15 @@ pub unsafe extern "C" fn logoschat_export_contact(h: *mut c_void) -> *mut c_char
         return ptr::null_mut();
     };
     match h.client.directory().export_contact() {
-        Some((account, device, kp, bundle_payload, bundle_sig)) => {
+        Some((account, device, kp_payload, kp_sig, bundle_payload, bundle_sig)) => {
             use base64::Engine;
             let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
             to_c_string(
                 serde_json::json!({
                     "account": account,
                     "device": device,
-                    "keyPackage": b64(&kp),
+                    "kpPayload": b64(&kp_payload),
+                    "kpSig": b64(&kp_sig),
                     "bundlePayload": b64(&bundle_payload),
                     "bundleSig": b64(&bundle_sig),
                 })
@@ -511,14 +515,23 @@ pub unsafe extern "C" fn logoschat_import_contact(h: *mut c_void, card_json: *co
     };
     let account = v["account"].as_str().unwrap_or("");
     let device = v["device"].as_str().unwrap_or("");
-    let (kp, bp, sig) = match (dec("keyPackage"), dec("bundlePayload"), dec("bundleSig")) {
-        (Ok(a), Ok(b), Ok(c)) => (a, b, c),
+    let (kp_payload, kp_sig, bp, sig) = match (
+        dec("kpPayload"),
+        dec("kpSig"),
+        dec("bundlePayload"),
+        dec("bundleSig"),
+    ) {
+        (Ok(a), Ok(b), Ok(c), Ok(d)) => (a, b, c, d),
         _ => {
             set_last_error("contact card has malformed base64 fields");
             return -1;
         }
     };
-    match h.client.directory().import_contact(account, device, kp, bp, sig) {
+    match h
+        .client
+        .directory()
+        .import_contact(account, device, kp_payload, kp_sig, bp, sig)
+    {
         Ok(()) => 0,
         Err(e) => {
             set_last_error(format!("import_contact failed: {e}"));
@@ -624,6 +637,38 @@ pub unsafe extern "C" fn logoschat_group_metadata(
         )),
         Err(e) => {
             set_last_error(format!("group_metadata failed: {e}"));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// #433: the group's recorded creator as its address hex, or an EMPTY string when the
+/// group records no creator (a GroupV1 created before #349, or a GroupV2). Lets a
+/// non-creator member address the actual creator (e.g. ping them to re-create a dead
+/// group) instead of guessing at the roster. Caller frees.
+///
+/// Returns null (see `logoschat_last_error`) for an unknown `convo_id` — an error,
+/// distinct from the empty-string "no creator recorded".
+///
+/// # Safety
+/// `h` a valid handle; `convo_id` a valid C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn logoschat_group_creator(
+    h: *mut c_void,
+    convo_id: *const c_char,
+) -> *mut c_char {
+    let Some(h) = (unsafe { handle(h) }) else {
+        set_last_error("null handle");
+        return ptr::null_mut();
+    };
+    let Some(convo) = cstr(convo_id) else {
+        set_last_error("convo_id is null or not UTF-8");
+        return ptr::null_mut();
+    };
+    match h.client.group_creator(convo) {
+        Ok(creator) => to_c_string(creator.unwrap_or_default()),
+        Err(e) => {
+            set_last_error(format!("group_creator failed: {e}"));
             ptr::null_mut()
         }
     }

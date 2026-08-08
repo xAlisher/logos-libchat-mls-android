@@ -1,0 +1,301 @@
+diff --git a/extensions/components/src/contact_registry/ephemeral.rs b/extensions/components/src/contact_registry/ephemeral.rs
+index b937b51..b09b688 100644
+--- a/extensions/components/src/contact_registry/ephemeral.rs
++++ b/extensions/components/src/contact_registry/ephemeral.rs
+@@ -4,10 +4,14 @@ use std::{
+     sync::{Arc, Mutex},
+ };
+ 
++use std::time::{SystemTime, UNIX_EPOCH};
++
+ use crypto::{Ed25519Signature, Ed25519VerifyingKey};
+ use libchat::{IdentityProvider, RegistrationService};
+ use logos_account::{AccountDirectory, DeviceSet, SignedDeviceBundle, verify_bundle};
+ 
++use super::http::{encode_payload, verify_keypackage_publication};
++
+ /// A Contact Registry used for Tests.
+ /// This implementation stores bundle bytes and then returns them when
+ /// retrieved.
+@@ -23,6 +27,11 @@ pub struct EphemeralRegistry {
+     // /import path is exercised headlessly (no node, no HTTP).
+     my_key_package: Arc<Mutex<Option<(String, Vec<u8>)>>>,
+     my_bundle: Arc<Mutex<Option<SignedDeviceBundle>>>,
++    // #GHSA-xxgx-7757-3qq6 Layer 1b: the signed key-package publication
++    // (device_id, payload, sig) — the device's proof-of-possession over its own
++    // key package, so an imported card binds the key package to the device
++    // instead of trusting whatever bytes the card carried.
++    my_keypackage_pub: Arc<Mutex<Option<(String, Vec<u8>, Vec<u8>)>>>,
+ }
+ 
+ impl EphemeralRegistry {
+@@ -30,15 +39,18 @@ impl EphemeralRegistry {
+         Self::default()
+     }
+ 
+-    /// #239: our contact card `(account, device, key_package, bundle_payload,
+-    /// bundle_sig)` for a peer to add us offline.
+-    pub fn export_contact(&self) -> Option<(String, String, Vec<u8>, Vec<u8>, Vec<u8>)> {
+-        let (device_id, kp) = self.my_key_package.lock().unwrap().clone()?;
++    /// #239: our contact card `(account, device, kp_payload, kp_sig,
++    /// bundle_payload, bundle_sig)` for a peer to add us offline. `kp_payload` is
++    /// the signed key-package publication; the raw key package is recoverable from
++    /// it, and `kp_sig` proves this device published it (verified on import).
++    pub fn export_contact(&self) -> Option<(String, String, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>)> {
++        let (device_id, kp_payload, kp_sig) = self.my_keypackage_pub.lock().unwrap().clone()?;
+         let bundle = self.my_bundle.lock().unwrap().clone()?;
+         Some((
+             hex::encode(bundle.account_pub.as_ref()),
+             device_id,
+-            kp,
++            kp_payload,
++            kp_sig,
+             bundle.payload.clone(),
+             bundle.signature.as_ref().to_vec(),
+         ))
+@@ -49,7 +61,8 @@ impl EphemeralRegistry {
+         &self,
+         account_hex: &str,
+         device_id: &str,
+-        key_package: Vec<u8>,
++        kp_payload: Vec<u8>,
++        kp_sig: Vec<u8>,
+         bundle_payload: Vec<u8>,
+         bundle_sig: Vec<u8>,
+     ) -> Result<(), String> {
+@@ -68,11 +81,16 @@ impl EphemeralRegistry {
+             signature: Ed25519Signature::from(sig_arr),
+         };
+         // verifies the bundle binds account -> devices, exactly like a fetch would.
+-        verify_bundle(&bundle.account_pub, &bundle).map_err(|e| e.to_string())?;
++        let set = verify_bundle(&bundle.account_pub, &bundle).map_err(|e| e.to_string())?;
++        // #GHSA-xxgx-7757-3qq6 Layer 1b: bind the key package to `device_id`, so a
++        // replayed genuine bundle can't smuggle an attacker's key package under a
++        // victim's device (the network `retrieve` branch does the same check; the
++        // #239 local cache used to skip it entirely).
++        let key_package = verify_keypackage_publication(&set, device_id, &kp_payload, &kp_sig)?;
+         self.key_packages
+             .lock()
+             .unwrap()
+-            .insert(device_id.to_string(), key_package);
++            .insert(device_id.to_lowercase(), key_package);
+         self.installations
+             .lock()
+             .unwrap()
+@@ -117,6 +135,17 @@ impl RegistrationService for EphemeralRegistry {
+         // like the HTTP registry, so tests exercise the deployed keying.
+         let device_id = hex::encode(identity.public_key().as_ref());
+         *self.my_key_package.lock().unwrap() = Some((device_id.clone(), key_bundle.clone())); // #239
++        // #GHSA-xxgx-7757-3qq6 Layer 1b: sign the key-package publication exactly
++        // as the HTTP registry does, so an offline contact card carries a proof the
++        // device holds this key package (verified in `import_contact`).
++        let ts = SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .map_err(|_| "clock".to_string())?
++            .as_millis() as u64;
++        let payload = encode_payload(ts, &key_bundle);
++        let sig = identity.sign(&payload);
++        *self.my_keypackage_pub.lock().unwrap() =
++            Some((device_id.clone(), payload, sig.as_ref().to_vec()));
+         self.key_packages.lock().unwrap().insert(device_id, key_bundle);
+         Ok(())
+     }
+diff --git a/extensions/components/src/contact_registry/http.rs b/extensions/components/src/contact_registry/http.rs
+index 79e68a3..c587658 100644
+--- a/extensions/components/src/contact_registry/http.rs
++++ b/extensions/components/src/contact_registry/http.rs
+@@ -38,6 +38,10 @@ pub struct HttpRegistry {
+     my_key_package: Arc<Mutex<Option<(String, Vec<u8>)>>>,
+     /// #239: our OWN signed device bundle captured as `publish` runs.
+     my_bundle: Arc<Mutex<Option<SignedDeviceBundle>>>,
++    // #GHSA-xxgx-7757-3qq6 Layer 1b: signed key-package publication (device_id,
++    // payload, sig) for the offline contact card, so an importer can bind the key
++    // package to this device instead of trusting it blindly.
++    my_keypackage_pub: Arc<Mutex<Option<(String, Vec<u8>, Vec<u8>)>>>,
+ }
+ 
+ #[derive(Debug, thiserror::Error)]
+@@ -107,6 +111,7 @@ impl HttpRegistry {
+             local_accounts: Arc::new(Mutex::new(HashMap::new())),
+             my_key_package: Arc::new(Mutex::new(None)),
+             my_bundle: Arc::new(Mutex::new(None)),
++            my_keypackage_pub: Arc::new(Mutex::new(None)),
+         }
+     }
+ 
+@@ -122,16 +127,19 @@ impl HttpRegistry {
+     }
+ 
+     /// #239: our contact card for a peer to add us offline over BLE. Returns
+-    /// `(account_hex, device_id_hex, key_package_bytes, bundle_payload, bundle_sig)`
+-    /// or `None` if register/publish haven't run this session.
+-    pub fn export_contact(&self) -> Option<(String, String, Vec<u8>, Vec<u8>, Vec<u8>)> {
+-        let (device_id, kp) = self.my_key_package.lock().unwrap().clone()?;
++    /// `(account_hex, device_id_hex, kp_payload, kp_sig, bundle_payload, bundle_sig)`
++    /// or `None` if register/publish haven't run this session. `kp_payload` is the
++    /// signed key-package publication (raw key package recoverable from it);
++    /// `kp_sig` proves this device published it (verified on import).
++    pub fn export_contact(&self) -> Option<(String, String, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>)> {
++        let (device_id, kp_payload, kp_sig) = self.my_keypackage_pub.lock().unwrap().clone()?;
+         let bundle = self.my_bundle.lock().unwrap().clone()?;
+         let account_hex = hex::encode(bundle.account_pub.as_ref());
+         Some((
+             account_hex,
+             device_id,
+-            kp,
++            kp_payload,
++            kp_sig,
+             bundle.payload.clone(),
+             bundle.signature.as_ref().to_vec(),
+         ))
+@@ -139,12 +147,14 @@ impl HttpRegistry {
+ 
+     /// #239: verify + seed a peer's contact card so an offline group create can add
+     /// them. The bundle is verified under `account_hex` (binds account -> devices),
+-    /// exactly as a directory fetch would be.
++    /// and the key-package publication is verified under `device_id`
++    /// (GHSA-xxgx-7757-3qq6), exactly as an authenticated directory fetch would be.
+     pub fn import_contact(
+         &self,
+         account_hex: &str,
+         device_id: &str,
+-        key_package: Vec<u8>,
++        kp_payload: Vec<u8>,
++        kp_sig: Vec<u8>,
+         bundle_payload: Vec<u8>,
+         bundle_sig: Vec<u8>,
+     ) -> Result<(), String> {
+@@ -163,6 +173,10 @@ impl HttpRegistry {
+             signature: Ed25519Signature::from(sig_arr),
+         };
+         let set = verify_bundle(&bundle.account_pub, &bundle).map_err(|e| e.to_string())?;
++        // #GHSA-xxgx-7757-3qq6 Layer 1b: bind the key package to `device_id` before
++        // caching it, so a replayed genuine bundle can't smuggle an attacker's key
++        // package under a victim's device. The #239 local cache used to skip this.
++        let key_package = verify_keypackage_publication(&set, device_id, &kp_payload, &kp_sig)?;
+         self.inject_account(account_hex, set);
+         self.inject_key_package(device_id, key_package);
+         Ok(())
+@@ -217,6 +231,11 @@ impl RegistrationService for HttpRegistry {
+         // Sign exactly the bytes that go on the wire.
+         let payload = encode_payload(timestamp_ms, &key_bundle);
+         let signature = identity.sign(&payload);
++        // #GHSA-xxgx-7757-3qq6 Layer 1b: capture the SIGNED publication for the
++        // offline contact card, so an importer can verify this device published
++        // the key package (the #239 raw-bytes capture carried no such proof).
++        *self.my_keypackage_pub.lock().unwrap() =
++            Some((device_id.clone(), payload.clone(), signature.as_ref().to_vec()));
+ 
+         let req = SubmitRequest {
+             device_id,
+@@ -362,7 +381,7 @@ impl AccountDirectory for HttpRegistry {
+ /// byte string parse exactly one way — no delimiter, no ambiguity, even though
+ /// `key_package` is arbitrary bytes. The device verifying key is carried
+ /// alongside as `device_id`, not embedded here.
+-fn encode_payload(timestamp_ms: u64, key_package: &[u8]) -> Vec<u8> {
++pub(crate) fn encode_payload(timestamp_ms: u64, key_package: &[u8]) -> Vec<u8> {
+     let mut out = Vec::with_capacity(8 + key_package.len());
+     out.extend_from_slice(&timestamp_ms.to_le_bytes());
+     out.extend_from_slice(key_package);
+@@ -371,7 +390,7 @@ fn encode_payload(timestamp_ms: u64, key_package: &[u8]) -> Vec<u8> {
+ 
+ /// Inverse of [`encode_payload`]. Returns `None` if the payload is shorter than
+ /// the fixed header (`8`).
+-fn decode_payload(payload: &[u8]) -> Option<(u64, &[u8])> {
++pub(crate) fn decode_payload(payload: &[u8]) -> Option<(u64, &[u8])> {
+     if payload.len() < 8 {
+         return None;
+     }
+@@ -379,6 +398,43 @@ fn decode_payload(payload: &[u8]) -> Option<(u64, &[u8])> {
+     Some((timestamp_ms, &payload[8..]))
+ }
+ 
++/// #GHSA-xxgx-7757-3qq6 Layer 1b: verify a key-package publication binds to
++/// `device_id` before it is cached for an offline add. The device must be one the
++/// account endorses, and the publication must carry that device's signature over
++/// its payload (proof-of-possession) — exactly the authenticated network
++/// `retrieve` branch, which the #239 local cache skipped. Returns the raw key
++/// package on success. Case-insensitive on `device_id` (signed ids are lower-case
++/// hex; the card string is untrusted).
++pub(crate) fn verify_keypackage_publication(
++    set: &DeviceSet,
++    device_id: &str,
++    kp_payload: &[u8],
++    kp_sig: &[u8],
++) -> Result<Vec<u8>, String> {
++    if !set
++        .devices
++        .iter()
++        .any(|d| d.eq_ignore_ascii_case(device_id))
++    {
++        return Err(format!("device {device_id} not in account's device set"));
++    }
++    let dev_bytes: [u8; 32] = hex::decode(device_id)
++        .map_err(|e| e.to_string())?
++        .try_into()
++        .map_err(|_| "device_id not a 32-byte key".to_string())?;
++    let dev_key = Ed25519VerifyingKey::from_bytes(&dev_bytes)
++        .map_err(|_| "device_id not a valid ed25519 key".to_string())?;
++    let sig_arr: [u8; 64] = kp_sig
++        .try_into()
++        .map_err(|_| "kp signature not 64 bytes".to_string())?;
++    dev_key
++        .verify(kp_payload, &Ed25519Signature::from(sig_arr))
++        .map_err(|_| "key package signature invalid".to_string())?;
++    let (_ts, key_package) =
++        decode_payload(kp_payload).ok_or_else(|| "short kp payload".to_string())?;
++    Ok(key_package.to_vec())
++}
++
+ /// Retry budget for the registry's transient, load-induced 5xx/429 responses.
+ /// The service is reliable request-by-request but sheds concurrent bursts, so a
+ /// few backed-off retries let a request land once the burst clears. On that path
+@@ -541,4 +597,48 @@ mod tests {
+             assert!(jitter_below(50) <= 50);
+         }
+     }
++
++    /// GHSA-xxgx-7757-3qq6: the exact case prior review missed — an IN-SET device
++    /// id paired with a key package the attacker controls. The account/device
++    /// checks pass; only the device signature over the publication catches it.
++    #[test]
++    fn keypackage_publication_must_be_signed_by_the_requested_device() {
++        use crypto::Ed25519SigningKey;
++
++        let device = Ed25519SigningKey::generate();
++        let device_id = hex::encode(device.verifying_key().as_ref());
++        let set = DeviceSet {
++            lamport: 0,
++            devices: vec![device_id.clone()],
++        };
++
++        let key_package = b"opaque-key-package-bytes".to_vec();
++        let payload = encode_payload(1_700_000_000_000, &key_package);
++        let good_sig = device.sign(&payload);
++
++        // Genuine card: the device signed its own publication -> accepted, and we
++        // recover exactly the key package it published.
++        let got = verify_keypackage_publication(&set, &device_id, &payload, good_sig.as_ref())
++            .expect("genuine publication should verify");
++        assert_eq!(got, key_package);
++
++        // Attacker swaps in their own key package, signed with THEIR key, but keeps
++        // the genuine endorsed device id: in-set + account checks pass, signature
++        // does not -> rejected.
++        let attacker = Ed25519SigningKey::generate();
++        let evil_payload = encode_payload(1_700_000_000_000, b"attacker-key-package");
++        let evil_sig = attacker.sign(&evil_payload);
++        assert!(
++            verify_keypackage_publication(&set, &device_id, &evil_payload, evil_sig.as_ref())
++                .is_err(),
++            "a publication signed by another key must be rejected"
++        );
++
++        // A device the account never endorsed is rejected outright.
++        let outsider = hex::encode(Ed25519SigningKey::generate().verifying_key().as_ref());
++        assert!(
++            verify_keypackage_publication(&set, &outsider, &payload, good_sig.as_ref()).is_err(),
++            "a device outside the account's set must be rejected"
++        );
++    }
+ }

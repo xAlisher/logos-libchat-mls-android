@@ -100,6 +100,15 @@ int logoschat_leave_group(void *handle, const char *convo_id);
 // convo_id — an error, never an empty name.
 char *logoschat_group_metadata(void *handle, const char *convo_id);
 
+// #433: the group's recorded creator as its address hex, or an EMPTY string when the
+// group records no creator (a GroupV1 created before #349, or a GroupV2). Lets a
+// non-creator member address the actual creator (e.g. ping them to re-create a dead
+// group) instead of guessing at the roster. Caller frees the returned string.
+//
+// Returns NULL (reason in logoschat_last_error) for an unknown convo_id — an error,
+// distinct from the empty-string "no creator recorded".
+char *logoschat_group_creator(void *handle, const char *convo_id);
+
 // The group's CURRENT roster as a JSON array string:
 //   [{"account":"<hex>","device":"<hex>"}, …]
 // Caller frees.

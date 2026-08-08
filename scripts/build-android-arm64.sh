@@ -49,7 +49,7 @@ if ! grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/buil
   # `git checkout -f` above reverts TRACKED files but leaves the files the patch
   # ADDS behind as untracked, so a re-run on an existing BUILD_DIR would die with
   # "already exists in working directory". Drop exactly the patch's created files.
-  for p in libchat-android-arm64 349-groupv1-remove-member 437-replace-on-desync-welcome; do
+  for p in libchat-android-arm64 349-groupv1-remove-member 437-replace-on-desync-welcome 433-expose-group-creator 490-keypackage-device-binding 491-keypackage-card-binding; do
     git apply --summary "$REPO_DIR/patches/$p.patch" \
       | awk '/^ create mode /{print $4}' | xargs -r rm -f
   done
@@ -62,6 +62,25 @@ if ! grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/buil
   # fresh group instead of erroring GroupAlreadyExists, so #350 recovery actually
   # resyncs a desynced member (applied after 349; touches the same file).
   git apply "$REPO_DIR/patches/437-replace-on-desync-welcome.patch"
+  # #433: expose the group's recorded creator (GroupConvo::creator → core.convo_creator
+  # → client.group_creator), so a non-creator member can address the actual creator
+  # instead of guessing the roster. Additive; applied after 437 (touches group_v1.rs +
+  # the trait + core + client).
+  git apply "$REPO_DIR/patches/433-expose-group-creator.patch"
+  # GHSA-xxgx-7757-3qq6 (HIGH): on the group add-member path, bind the KeyPackage
+  # fetched from the registry to the signer id we asked for (leaf signature_key ==
+  # hex(requested id)), in both GroupV1 (key_package_for_signer) and GroupV2
+  # (add_member). Upstream libchat validated the package but never checked it belonged
+  # to the requested device, so a malicious registry / poisoned BLE cache could add an
+  # attacker's leaf under a victim's identity. Additive; applied last (no conflict with
+  # the group patches above — distinct hunks).
+  git apply "$REPO_DIR/patches/490-keypackage-device-binding.patch"
+  # GHSA-xxgx-7757-3qq6 (Layer 1b): close the #239 injection point — verify the
+  # offline contact card's key-package publication is signed by the requested
+  # device (proof-of-possession) before caching it, mirroring the authenticated
+  # network retrieve branch the local cache used to skip. Adds the signed
+  # publication to the card (kpPayload/kpSig); the FFI wrapper carries them.
+  git apply "$REPO_DIR/patches/491-keypackage-card-binding.patch"
 fi
 grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs \
   || { echo "patch did not apply"; exit 1; }
@@ -69,6 +88,16 @@ grep -q '"macos" | "linux" | "android"' extensions/logos-delivery-rust/build.rs 
 # patch landed without it rather than shipping a silently unenforced removal.
 grep -q 'removes_authorized' core/conversations/src/conversation/group_v1.rs \
   || { echo "#349 removal-authorization gate missing"; exit 1; }
+# GHSA-xxgx-7757-3qq6: the KeyPackage-to-signer binding is a security boundary — fail
+# the build if either add path shipped without it rather than silently regressing.
+grep -q 'GHSA-xxgx-7757-3qq6' core/conversations/src/conversation/group_v1.rs \
+  && grep -q 'GHSA-xxgx-7757-3qq6' core/conversations/src/conversation/group_v2.rs \
+  || { echo "GHSA-xxgx-7757-3qq6 keypackage-binding check missing"; exit 1; }
+# GHSA-xxgx-7757-3qq6 Layer 1b: fail the build if the #239 contact-card injection
+# gate didn't land — else a poisoned local key-package cache is reachable again.
+grep -q 'verify_keypackage_publication' extensions/components/src/contact_registry/http.rs \
+  && grep -q 'verify_keypackage_publication' extensions/components/src/contact_registry/ephemeral.rs \
+  || { echo "GHSA-xxgx-7757-3qq6 keypackage-card binding missing"; exit 1; }
 # #437: fail the build if the replace-on-desync recovery path didn't land — else
 # #350 auto-recovery silently reverts to stranding desynced members.
 grep -q 'replace_old_group' core/conversations/src/conversation/group_v1.rs \
@@ -77,6 +106,10 @@ grep -q 'replace_old_group' core/conversations/src/conversation/group_v1.rs \
 # fail the build if the gate is gone, else a non-creator fork could replace a group.
 grep -q 'creator_credential_of' core/conversations/src/conversation/group_v1.rs \
   || { echo "#437 creator-authored replace gate missing"; exit 1; }
+# #433: fail the build if the creator-exposure accessor didn't land, else #442
+# ping-creator silently falls back to guessing the roster.
+grep -q 'fn creator(&self) -> Option<String>' core/conversations/src/conversation.rs \
+  || { echo "#433 GroupConvo::creator accessor missing"; exit 1; }
 
 echo "==> 3/6 NDK + aws-lc-rs + delivery-node env"
 export CC_aarch64_linux_android=$CLANG
@@ -110,7 +143,7 @@ file "$OUT_DIR/liblogoschat.so"
 file "$OUT_DIR/liblogoschat.so" | grep -q 'ARM aarch64' || { echo "not an arm64 ELF"; exit 1; }
 SYMS=$("$TC/bin/llvm-nm" -D --defined-only "$OUT_DIR/liblogoschat.so" | grep -c ' logoschat_')
 echo "    exported logoschat_* symbols: $SYMS"
-[ "$SYMS" -ge 13 ] || { echo "expected >=13 logoschat_* exports"; exit 1; }
+[ "$SYMS" -ge 14 ] || { echo "expected >=14 logoschat_* exports"; exit 1; }
 # The wrapper must declare liblogosdelivery as a NEEDED (relocatable soname).
 "$TC/bin/llvm-readelf" -d "$OUT_DIR/liblogoschat.so" | grep -q 'liblogosdelivery.so' \
   || { echo "liblogosdelivery.so missing from DT_NEEDED"; exit 1; }

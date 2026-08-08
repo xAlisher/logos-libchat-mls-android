@@ -1,0 +1,51 @@
+diff --git a/core/conversations/src/conversation/group_v1.rs b/core/conversations/src/conversation/group_v1.rs
+index 6d6b64a..1d6a687 100644
+--- a/core/conversations/src/conversation/group_v1.rs
++++ b/core/conversations/src/conversation/group_v1.rs
+@@ -157,6 +157,22 @@ impl GroupV1Convo {
+ 
+         let key_package_in = KeyPackageIn::tls_deserialize(&mut keypkg_bytes.as_slice())?;
+         let keypkg = key_package_in.validate(provider.crypto(), ProtocolVersion::Mls10)?; //TODO: P3 - Hardcoded Protocol Version
++        // SECURITY (GHSA-xxgx-7757-3qq6): validate() only proves the package is
++        // well-formed and self-signed — NOT that it belongs to the signer we asked
++        // the registry for. A malicious registry (or a poisoned BLE cache hit served
++        // ahead of the network) can return an attacker's package for a victim's id,
++        // adding the attacker's leaf under the victim's identity (confidentiality
++        // break + sender-attribution spoof). A signer id is hex(Ed25519 verifying key)
++        // (see core.rs `IdentId::new`), so bind the fetched leaf's signature_key to the
++        // requested id. Bind to the KEY, not credential bytes: an impostor can copy the
++        // id into a credential but cannot sign a leaf with the victim's key — the same
++        // reasoning the #349 creator-binding uses.
++        let leaf_key = hex::encode(keypkg.leaf_node().signature_key().as_slice());
++        if leaf_key != signer.as_str() {
++            return Err(ChatError::Protocol(format!(
++                "keypackage for signer {signer} is bound to a different signing key ({leaf_key})"
++            )));
++        }
+         Ok(keypkg)
+     }
+ 
+diff --git a/core/conversations/src/conversation/group_v2.rs b/core/conversations/src/conversation/group_v2.rs
+index c547e5a..ee7afd0 100644
+--- a/core/conversations/src/conversation/group_v2.rs
++++ b/core/conversations/src/conversation/group_v2.rs
+@@ -336,6 +336,19 @@ where
+                 .credential()
+                 .serialized_content()
+                 .to_vec();
++            // SECURITY (GHSA-xxgx-7757-3qq6): `member_id` above is read from the
++            // package's OWN credential and was never checked equal to `member` (the
++            // signer we asked for). A malicious registry / poisoned BLE cache can return
++            // an attacker's validated package for a victim's id, adding the attacker's
++            // leaf under the victim's identity (confidentiality break + attribution
++            // spoof). A signer id is hex(Ed25519 verifying key), so bind the leaf's
++            // signature_key (not the spoofable credential bytes) to the requested id.
++            let leaf_key = hex::encode(keypkg.leaf_node().signature_key().as_slice());
++            if leaf_key != member.as_str() {
++                return Err(ChatError::generic(format!(
++                    "key package for {member} is bound to a different signing key ({leaf_key})"
++                )));
++            }
+             invites.push((member_id, member.to_string(), kp_bytes));
+         }
+ 

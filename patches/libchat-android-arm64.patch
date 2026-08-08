@@ -5220,7 +5220,7 @@ index 0cf5987..9725aaa 100644
 +        self.local_keypackages
 +            .lock()
 +            .unwrap()
-+            .insert(device_id.to_string(), key_package);
++            .insert(device_id.to_lowercase(), key_package);
 +    }
 +
 +    /// #239: seed a peer's verified account device-set locally (account_pub hex ->
@@ -5251,7 +5251,7 @@ index 0cf5987..9725aaa 100644
      fn retrieve(&self, device_id: &str) -> Result<Option<Vec<u8>>, HttpRegistryError> {
 +        // #239: a BLE-seeded key package wins — it lets an offline create succeed
 +        // without the registry (and the peer may never be in the registry at all).
-+        if let Some(kp) = self.local_keypackages.lock().unwrap().get(device_id) {
++        if let Some(kp) = self.local_keypackages.lock().unwrap().get(&device_id.to_lowercase()) {
 +            return Ok(Some(kp.clone()));
 +        }
          let url = format!("{}/v0/keypackage/{}", self.base_url, device_id);
